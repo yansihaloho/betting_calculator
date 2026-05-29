@@ -1,0 +1,28 @@
+{
+  "histori": [
+    {
+      "id": "S-1779976979307",
+      "tanggal": "28/5/2026, 21.02.59",
+      "hasil": "MENANG",
+      "putaran": 1,
+      "profit": 20000,
+      "rugi": 0,
+      "taruhanAwal": 500,
+      "pengali": 95
+    }
+  ],
+  "laporan": [
+    {
+      "tanggal": "Kamis, 28 Mei 2026",
+      "keterangan": "MENANG PUTARAN 1",
+      "total": 20000,
+      "19:00": "MENANG P1 | RESULT -"
+    }
+  ],
+  "saldo": 2020000,
+  "taruhanAwal": 500,
+  "jumlahPutaran": 6,
+  "targetProfit": 20000,
+  "pengaliMenang": 95,
+  "updatedAt": "2026-05-28T14:31:10.043Z"
+}

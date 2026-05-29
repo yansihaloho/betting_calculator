@@ -1,49 +1,32 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
-import { CurrencyProvider } from "@/contexts/CurrencyContext";
-import { Layout } from "@/components/Layout";
-import { OddsConverter } from "@/pages/OddsConverter";
-import { SingleBet } from "@/pages/SingleBet";
-import { Accumulator } from "@/pages/Accumulator";
-import { KellyCriterion } from "@/pages/KellyCriterion";
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
+import Calculator from "@/pages/Calculator";
+import { Toaster } from "sonner";
 
-const queryClient = new QueryClient();
+export default function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      return (localStorage.getItem("theme") as "dark" | "light") || "dark";
+    } catch {
+      return "dark";
+    }
+  });
 
-function Router() {
-  return (
-    <Layout>
-      <Switch>
-        <Route path="/" component={OddsConverter} />
-        <Route path="/single" component={SingleBet} />
-        <Route path="/accumulator" component={Accumulator} />
-        <Route path="/kelly" component={KellyCriterion} />
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
-  );
-}
-
-function App() {
   useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.remove("light");
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+      root.classList.add("light");
+    }
+    try { localStorage.setItem("theme", theme); } catch {}
+  }, [theme]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <CurrencyProvider>
-        <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
-        </TooltipProvider>
-      </CurrencyProvider>
-    </QueryClientProvider>
+    <div className={theme === "dark" ? "dark" : ""}>
+      <Calculator theme={theme} toggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")} />
+      <Toaster richColors position="bottom-right" />
+    </div>
   );
 }
-
-export default App;
