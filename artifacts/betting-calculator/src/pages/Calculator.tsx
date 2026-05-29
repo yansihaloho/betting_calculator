@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
-import AnalisisNomor from "./AnalisisNomor";
 import SaldoPage from "./SaldoPage";
 import {
   Sun, Moon, Download, Copy, RotateCcw, Trash2, RefreshCw,
@@ -182,7 +181,7 @@ function isNomorMenang(angka: string, nomorList: string): boolean {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "analisis" | "saldo";
+type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "saldo";
 interface PutaranData { putaran:number; taruhan:number; modal:number; akumulasi:number; hadiah:number; profit:number; }
 type SyncStatus = "idle" | "loading" | "saving" | "synced" | "error" | "offline";
 type ResultSource = "live" | "lokal" | "loading";
@@ -508,6 +507,7 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
   const [processing, setProcessing]         = useState(false);
   const [putaranMenang, setPutaranMenang]   = useState<number | null>(() => ls("resumePutaranMenang", null));
   const [searchResult, setSearchResult]     = useState("");
+  const [selectedMonth, setSelectedMonth]   = useState<string>("");
   const [autoRefresh, setAutoRefresh]       = useState(true);
   const [lastRefresh, setLastRefresh]       = useState(new Date());
   const [isRefreshing, setIsRefreshing]     = useState(false);
@@ -1167,6 +1167,25 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
   // ── Chart data ────────────────────────────────────────────────────────────────
   const chartData = useMemo(() => histori.slice().reverse().slice(-14).map((h, i) => ({ name:`S${i+1}`, profit: h.hasil==="MENANG" ? h.profit : -h.rugi, kumulatif:0 })).map((d, i, arr) => ({ ...d, kumulatif: arr.slice(0,i+1).reduce((s,x) => s+x.profit, 0) })), [histori]);
   const pieData   = [{ name:"Menang", value:histori.filter(h=>h.hasil==="MENANG").length, color:"#22c55e" }, { name:"Kalah", value:histori.filter(h=>h.hasil==="KALAH").length, color:"#ef4444" }].filter(d=>d.value>0);
+  const uniqueMonths = useMemo(() => {
+    const months: string[] = [];
+    const seen = new Set<string>();
+    resultData.forEach(r => {
+      const parts = r.tanggal.split(" ");
+      const m = parts.length >= 3 ? `${parts[1]} ${parts[2]}` : "";
+      if (m && !seen.has(m)) { seen.add(m); months.push(m); }
+    });
+    return months;
+  }, [resultData]);
+  const activeMonth = selectedMonth || uniqueMonths[0] || "";
+  const filteredResultData = useMemo(() => {
+    if (!activeMonth) return resultData;
+    return resultData.filter(r => {
+      const parts = r.tanggal.split(" ");
+      const m = parts.length >= 3 ? `${parts[1]} ${parts[2]}` : "";
+      return m === activeMonth;
+    });
+  }, [resultData, activeMonth]);
 
   // ── Style helpers ─────────────────────────────────────────────────────────────
   const cardCls = isDark ? "rounded-[24px] border border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl" : "rounded-[24px] border border-slate-200 bg-white shadow-xl";
@@ -1332,7 +1351,6 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
               { id:"result",     icon:<Award className="w-3 h-3"/>, label:"Result" },
               { id:"statistik",  icon:<BarChart2 className="w-3 h-3"/>, label:"Statistik" },
 
-              { id:"analisis",   icon:<Hash className="w-3 h-3"/>, label:"Analisis" },
               { id:"saldo",      icon:<Banknote className="w-3 h-3"/>, label:"Saldo" },
             ] as { id:MenuItem; icon:React.ReactNode; label:string }[]).map(m => (
               <button key={m.id} onClick={() => { setMenu(m.id); setMobileMenuOpen(false); }}
@@ -1589,13 +1607,13 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
         {/* ══ RESULT ══ */}
         {menu === "result" && (
           <div className="animate-slide-up space-y-4">
-            <div className="rounded-[22px] bg-gradient-to-r from-indigo-700 via-blue-700 to-cyan-600 text-white p-5 shadow-2xl">
+            {/* Header */}
+            <div className="rounded-[22px] bg-gradient-to-r from-indigo-700 via-blue-700 to-cyan-600 text-white p-4 md:p-5 shadow-2xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-4xl font-black">Toto Macau Result 2026</h1>
+                  <h1 className="text-xl md:text-3xl font-black">Toto Macau Result</h1>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <p className="opacity-80 text-xs">Update: {lastRefresh.toLocaleTimeString("id-ID")} {isRefreshing && <span className="animate-pulse">⟳</span>}</p>
-                    {/* Data source badge */}
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${
                       resultSource === "live" ? "bg-green-500/30 border-green-400/50 text-green-200" :
                       resultSource === "lokal" ? "bg-yellow-500/30 border-yellow-400/50 text-yellow-200" :
@@ -1605,28 +1623,43 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input type="text" placeholder="Cari nomor..." value={searchResult} onChange={e => setSearchResult(e.target.value)} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white placeholder-white/60 text-xs w-36 focus:outline-none"/>
-                  <button onClick={() => handleRefreshResults(false)} disabled={isRefreshing} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold text-xs flex items-center gap-1 disabled:opacity-50"><RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}/>Refresh</button>
-                  <button onClick={() => setAutoRefresh(v => !v)} className={`px-3 py-2 rounded-xl font-bold text-xs border transition-all ${autoRefresh ? "bg-green-500/30 border-green-400/50" : "bg-white/10 border-white/30"}`}>Auto {autoRefresh ? "✓" : "✗"}</button>
-                  <button onClick={requestResultNotifPermission} title="Aktifkan notifikasi browser saat hasil baru keluar" className={`px-3 py-2 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all ${
-                    typeof Notification !== "undefined" && Notification.permission === "granted"
-                      ? "bg-green-500/30 border-green-400/50 text-green-200"
-                      : "bg-white/10 border-white/30 text-white hover:bg-white/20"
-                  }`}><Bell className="w-3.5 h-3.5"/>{typeof Notification !== "undefined" && Notification.permission === "granted" ? "Notif ✓" : "Notif"}</button>
-                  <button onClick={() => { setManualDate(new Date().toISOString().split("T")[0]); setShowManualResult(true); }} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold text-xs flex items-center gap-1"><PlusCircle className="w-3.5 h-3.5"/>Input Manual</button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <input type="text" placeholder="Cari..." value={searchResult} onChange={e => setSearchResult(e.target.value)} className="px-2.5 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white placeholder-white/60 text-xs w-28 focus:outline-none"/>
+                  <button onClick={() => handleRefreshResults(false)} disabled={isRefreshing} className="px-2.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold text-xs flex items-center gap-1 disabled:opacity-50"><RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`}/>Refresh</button>
+                  <button onClick={() => setAutoRefresh(v => !v)} className={`px-2.5 py-1.5 rounded-xl font-bold text-xs border transition-all ${autoRefresh ? "bg-green-500/30 border-green-400/50" : "bg-white/10 border-white/30"}`}>Auto {autoRefresh ? "✓" : "✗"}</button>
+                  <button onClick={() => { setManualDate(new Date().toISOString().split("T")[0]); setShowManualResult(true); }} className="px-2.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-white font-bold text-xs flex items-center gap-1"><PlusCircle className="w-3 h-3"/>Input</button>
                 </div>
               </div>
             </div>
-            {/* Draw schedule countdown */}
+
+            {/* Month selector */}
+            {uniqueMonths.length > 1 && (
+              <div className="flex overflow-x-auto gap-2 pb-1 scrollbar-none">
+                {uniqueMonths.map(month => (
+                  <button key={month} onClick={() => setSelectedMonth(month === activeMonth ? "" : month)}
+                    className={`flex-shrink-0 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                      month === activeMonth
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-500/30"
+                        : isDark ? "bg-white/10 text-white/70 hover:bg-white/15" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}>
+                    {month}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Draw schedule */}
             <DrawSchedulePanel isDark={isDark} />
+
             {/* Legend */}
             <div className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs ${isDark ? "bg-white/5 border border-white/10" : "bg-slate-50 border border-slate-200"}`}>
               <span className="font-bold opacity-60">Keterangan:</span>
-              <span className="flex items-center gap-1"><span className="w-4 h-4 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 inline-block"/><Star className="w-3 h-3 text-yellow-400"/>= Nomor taruhan kamu</span>
+              <span className="flex items-center gap-1"><span className="w-4 h-4 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 inline-block"/><Star className="w-3 h-3 text-yellow-400"/>= Taruhan kamu</span>
               <span className="flex items-center gap-1"><span className="w-4 h-4 rounded-md bg-gradient-to-r from-blue-600 to-cyan-500 inline-block"/>= Nomor lain</span>
             </div>
-            <div className={`${cardCls} overflow-hidden`}>
+
+            {/* Desktop: Table */}
+            <div className={`hidden md:block ${cardCls} overflow-hidden`}>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[700px]">
                   <thead>
@@ -1636,7 +1669,7 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
                     </tr>
                   </thead>
                   <tbody>
-                    {resultData.filter(item => JSON.stringify(item).toLowerCase().includes(searchResult.toLowerCase())).map((item, i) => (
+                    {filteredResultData.filter(item => JSON.stringify(item).toLowerCase().includes(searchResult.toLowerCase())).map((item, i) => (
                       <tr key={i} className={`border-t ${isDark ? "border-white/10 hover:bg-white/5" : "border-slate-100 hover:bg-slate-50"} transition-colors`}>
                         <td className="p-4"><div className="font-black">{item.hari}</div><div className={`text-xs ${isDark ? "text-white/50" : "text-slate-500"}`}>{item.tanggal}</div></td>
                         {TIME_SLOTS.map(s => {
@@ -1661,10 +1694,48 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
                 </table>
               </div>
             </div>
+
+            {/* Mobile: Cards */}
+            <div className="md:hidden space-y-3">
+              {filteredResultData.filter(item => JSON.stringify(item).toLowerCase().includes(searchResult.toLowerCase())).map((item, i) => (
+                <div key={i} className={`${cardCls} p-4`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <div className="font-black text-sm">{item.hari}</div>
+                      <div className={`text-xs ${isDark ? "text-white/50" : "text-slate-500"}`}>{item.tanggal}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TIME_SLOTS.map(s => {
+                      const val = String(item[s as keyof typeof item] || "-");
+                      const isWin = isNomorMenang(val, customNumbers);
+                      return (
+                        <div key={s} className="flex flex-col items-center gap-1">
+                          <span className={`text-[10px] font-bold ${isDark ? "text-white/40" : "text-slate-400"}`}>{s}</span>
+                          <div className={`w-full flex items-center justify-center gap-0.5 px-1 py-2 rounded-xl text-sm font-black tracking-wider font-mono ${
+                            isWin ? "bg-gradient-to-r from-yellow-500 to-orange-500 text-white ring-2 ring-yellow-400/50" :
+                            val !== "-" ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white" :
+                            isDark ? "bg-white/5 text-white/20" : "bg-slate-100 text-slate-300"
+                          }`}>
+                            {isWin && <Star className="w-2.5 h-2.5 flex-shrink-0"/>}
+                            {val}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {filteredResultData.length === 0 && (
+                <div className={`${cardCls} p-12 text-center`}>
+                  <p className="opacity-40 text-sm">Belum ada data result untuk bulan ini</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* ══ STATISTIK ══ */}
+                {/* ══ STATISTIK ══ */}
         {menu === "statistik" && (
           <div className="animate-slide-up space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1806,12 +1877,6 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
         )}
 
         {/* ══ ANALISIS NOMOR ══ */}
-        {menu === "analisis" && (
-          <div className="animate-slide-up">
-            <AnalisisNomor resultData={resultData} customNumbers={customNumbers} isDark={isDark}/>
-          </div>
-        )}
-
         {/* ══ SALDO ══ */}
         {menu === "saldo" && (
           <div className="animate-slide-up">
@@ -1829,7 +1894,6 @@ export default function Calculator({ theme, toggleTheme }: { theme: "dark"|"ligh
             { id:"result",     label:"Result",     icon:<Award className="w-4 h-4"/> },
             { id:"statistik",  label:"Statistik",  icon:<BarChart2 className="w-4 h-4"/> },
 
-            { id:"analisis",   label:"Analisis",   icon:<Hash className="w-4 h-4"/> },
             { id:"saldo",      label:"Saldo",      icon:<Banknote className="w-4 h-4"/> },
           ] as { id: MenuItem; label: string; icon: React.ReactNode }[]).map(item => (
             <button key={item.id} onClick={() => setMenu(item.id)}
