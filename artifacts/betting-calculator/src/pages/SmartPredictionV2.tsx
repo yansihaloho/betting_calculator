@@ -1,30 +1,37 @@
 /**
- * Smart Prediction AI V2 — Mesin Prediksi 4D Terpadu TTM
+ * Smart Prediction AI V2 — Mesin Prediksi 4D Generasi Baru
  *
- * Upgrade dari V1: analisis per-digit (4 posisi × 10 digit) menggunakan 10 engine.
+ * 12 engine analitik independen dengan adaptive ensemble weighting.
  *
- * ENGINE PER POSISI (As/Kop/Kepala/Ekor):
- *   1. Recency Eksponensial   — draw terbaru berbobot exp(-i*0.08)
- *   2. Gap / Overdue          — digit paling "jatuh tempo" per posisi
- *   3. Momentum Tren          — frekuensi 15 draw terakhir vs 15 sebelumnya
- *   4. Pola Hari + Slot       — statistik spesifik hari + slot ini
- *   5. Markov Transisi        — P(digit_t | digit_{t-1}) per posisi
- *   6. Transisi Slot          — P(digit_slot_ini | digit_slot_sebelumnya) per posisi
- *   7. Balance Frekuensi      — digit kurang muncul mendapat boost
- *   8. Posisi Harmonis        — digit yang sering muncul bersama di posisi lain
- *   9. Streak Detector        — deteksi digit sedang "panas" (≥2x berturut-turut)
- *  10. Distribusi Seragam     — normalisasi untuk menghindari bias
+ * UPGRADE DARI V1:
+ *   E01 Multi-window Recency     — 3 jendela waktu + adaptive blend
+ *   E02 Poisson Gap Model        — distribusi eksponensial keterlambatan
+ *   E03 2nd-order Markov Chain   — P(t | t-2, t-1) memori 2 langkah
+ *   E04 Slot Transition+         — P(slot_now | slot_prev) berbobot recency
+ *   E05 Day×Slot Pattern         — spesifik hari + slot dengan decay
+ *   E06 Momentum + Akselerasi    — turunan pertama & kedua tren
+ *   E07 Cross-position Corr.     — korelasi digit antar 4 posisi
+ *   E08 Cyclic Detection         — deteksi siklus periodik digit
+ *   E09 Hot/Cold Streak          — streak panas & overdue dingin
+ *   E10 Balance Equilibrium      — keseimbangan distribusi
+ *   E11 Sum Pattern              — pola jumlah digit total
+ *   E12 Repeat Pattern           — digit berulang dari draw terakhir
  *
- * OUTPUT: 4D prediksi + 14 jenis taruhan sesuai format tabel standar
+ * CONSENSUS: Borda count → voting agreement → confidence calibration
+ * OUTPUT:    4D utama + 4D alternatif + top-25 kandidat + 14 jenis taruhan
  */
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Brain, Clock, Zap, TrendingUp, Hash, Layers,
   ArrowRight, RefreshCw, CheckCircle, Copy, ChevronDown, ChevronUp,
-  Star, Activity, Flame, Shield
+  Star, Activity, Flame, Shield, Target, BarChart2,
+  Cpu, Award, GitBranch, Waves, Repeat, Scale, Sun
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, RadarChart,
+  PolarGrid, PolarAngleAxis, Radar
+} from "recharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ResultRow = { hari: string; tanggal: string; [slot: string]: string };
@@ -36,7 +43,8 @@ const SLOT_NAMES: Record<string, string> = {
   "19:00": "Malam", "22:00": "Larut Malam", "23:00": "Dini Hari",
 };
 const SLOT_MINUTES: Record<string, number> = {
-  "00:01": 1, "13:00": 780, "16:00": 960, "19:00": 1140, "22:00": 1320, "23:00": 1380,
+  "00:01": 1, "13:00": 780, "16:00": 960,
+  "19:00": 1140, "22:00": 1320, "23:00": 1380,
 };
 const PREV_SLOT: Record<string, string | null> = {
   "00:01": null, "13:00": "00:01", "16:00": "13:00",
@@ -47,36 +55,33 @@ const WIB_MS = 7 * 3600_000;
 const POS_NAMES = ["As", "Kop", "Kepala", "Ekor"] as const;
 
 // ── Shio Tables ───────────────────────────────────────────────────────────────
-// Standard table (by last-2D value): consistent with existing SmartPrediction.tsx
 const SHIO_NAMES = [
   "Kuda", "Ular", "Naga", "Kelinci", "Harimau", "Kerbau",
   "Tikus", "Babi", "Anjing", "Ayam", "Monyet", "Kambing",
+];
+const MACAU_SHIO = [
+  "Kambing", "Kuda", "Ular", "Naga", "Kelinci", "Harimau",
+  "Kerbau", "Tikus", "Babi", "Anjing", "Ayam", "Monyet",
 ];
 function getShio(twoDigit: string): string {
   const n = parseInt(twoDigit, 10);
   const idx = (n === 0 ? 100 : n) % 12;
   return `${twoDigit} : ${SHIO_NAMES[idx]}`;
 }
-
-// Macau Shio — offset table used by Macau-specific sites
-const MACAU_SHIO = [
-  "Kambing", "Kuda", "Ular", "Naga", "Kelinci", "Harimau",
-  "Kerbau", "Tikus", "Babi", "Anjing", "Ayam", "Monyet",
-];
 function getMacauShio(twoDigit: string): string {
   const n = parseInt(twoDigit, 10);
   const idx = (n === 0 ? 100 : n) % 12;
   return `${twoDigit} : ${MACAU_SHIO[idx]}`;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function validDraw(v: string): boolean { return /^\d{4}$/.test(v); }
 function getResult(row: ResultRow, slot: string): string | null {
   const v = String(row[slot] ?? "");
   return validDraw(v) ? v : null;
 }
 function wibMinutes(): number { return ((Date.now() + WIB_MS) % 86_400_000) / 60_000; }
-function getWibDayName(): string { return DAY_NAMES[new Date().getDay()]; }
+function getWibDayName(): string { return DAY_NAMES[new Date(Date.now() + WIB_MS).getDay()]; }
 
 function getNextSlotInfo(): { nextSlot: string; minsUntil: number } {
   const wib = wibMinutes();
@@ -91,6 +96,14 @@ function normalise(arr: number[]): number[] {
   return arr.map(v => v / max);
 }
 
+function softmax(arr: number[], temp = 1): number[] {
+  const shifted = arr.map(v => v / temp);
+  const maxV = Math.max(...shifted);
+  const exp = shifted.map(v => Math.exp(v - maxV));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map(v => v / sum);
+}
+
 // ── Draw extraction ────────────────────────────────────────────────────────────
 function getDrawsForSlot(resultData: ResultRow[], slot: string): string[] {
   const out: string[] = [];
@@ -100,7 +113,6 @@ function getDrawsForSlot(resultData: ResultRow[], slot: string): string[] {
   }
   return out; // newest first
 }
-
 function getLastResult(resultData: ResultRow[], slot: string): string | null {
   for (const row of resultData) {
     const r = getResult(row, slot);
@@ -109,16 +121,44 @@ function getLastResult(resultData: ResultRow[], slot: string): string | null {
   return null;
 }
 
-// ── Per-digit Engines ─────────────────────────────────────────────────────────
-// Each engine returns scores[10] for digits 0-9 at a given position
+// ═══════════════════════════════════════════════════════════════════════════════
+// 12 ENGINES — each returns scores[10] for digits 0-9 at a given position
+// ═══════════════════════════════════════════════════════════════════════════════
 
-function eng1_recency(draws: string[], pos: number): number[] {
-  const s = new Array(10).fill(0);
-  draws.forEach((d, i) => { s[+d[pos]] += Math.exp(-i * 0.08); });
-  return normalise(s);
+// E01: Multi-window Recency (3 temporal windows + adaptive blend)
+function e01_multiRecency(draws: string[], pos: number): number[] {
+  if (draws.length === 0) return new Array(10).fill(0.1);
+  const w1 = draws.slice(0, Math.min(5, draws.length));
+  const w2 = draws.slice(5, Math.min(20, draws.length));
+  const w3 = draws.slice(20, Math.min(60, draws.length));
+
+  const s1 = new Array(10).fill(0);
+  const s2 = new Array(10).fill(0);
+  const s3 = new Array(10).fill(0);
+
+  w1.forEach((d, i) => { s1[+d[pos]] += Math.exp(-i * 0.20); });
+  w2.forEach((d, i) => { s2[+d[pos]] += Math.exp(-i * 0.08); });
+  w3.forEach((d, i) => { s3[+d[pos]] += Math.exp(-i * 0.03); });
+
+  const n1 = normalise(s1);
+  const n2 = w2.length > 0 ? normalise(s2) : new Array(10).fill(0.1);
+  const n3 = w3.length > 0 ? normalise(s3) : new Array(10).fill(0.1);
+
+  // Adaptive blend: recent window gets more weight if it shows a clear peak
+  const peak1 = Math.max(...n1);
+  const signalStrength = Math.max(0, (peak1 - 0.3) / 0.7);
+  const a1 = 0.50 + signalStrength * 0.20;
+  const a2 = (1 - a1) * 0.70;
+  const a3 = (1 - a1) * 0.30;
+
+  return normalise(n1.map((v, i) => a1 * v + a2 * n2[i] + a3 * n3[i]));
 }
 
-function eng2_gap(draws: string[], pos: number): number[] {
+// E02: Poisson / Exponential Gap Model
+// Models digit inter-arrival as exponential distribution (memoryless)
+function e02_poissonGap(draws: string[], pos: number): number[] {
+  if (draws.length < 5) return new Array(10).fill(0.1);
+
   const freq = new Array(10).fill(0);
   const lastSeen = new Array(10).fill(-1);
   draws.forEach((d, i) => {
@@ -126,75 +166,82 @@ function eng2_gap(draws: string[], pos: number): number[] {
     freq[dig]++;
     if (lastSeen[dig] === -1) lastSeen[dig] = i;
   });
+
   const total = draws.length;
-  if (total < 5) return new Array(10).fill(0.1);
   const s = new Array(10).fill(0);
   for (let d = 0; d <= 9; d++) {
-    const last = lastSeen[d] === -1 ? total : lastSeen[d];
-    const avgInterval = freq[d] > 0 ? total / freq[d] : total;
-    s[d] = Math.min(3, last / Math.max(avgInterval, 1)) / 3;
+    // Laplace-smoothed rate
+    const rate = (freq[d] + 0.5) / (total + 5);
+    const expectedGap = 1 / rate;
+    const gap = lastSeen[d] === -1 ? total : lastSeen[d];
+    // CDF of Exponential distribution: P(waiting <= gap | rate)
+    s[d] = 1 - Math.exp(-gap / expectedGap);
   }
   return normalise(s);
 }
 
-function eng3_momentum(draws: string[], pos: number): number[] {
-  if (draws.length < 10) return new Array(10).fill(0.1);
-  const N = Math.min(15, Math.floor(draws.length / 2));
-  const recent = draws.slice(0, N);
-  const prior = draws.slice(N, N * 2);
-  const rf = new Array(10).fill(0);
-  const pf = new Array(10).fill(0);
-  recent.forEach(d => rf[+d[pos]]++);
-  prior.forEach(d => pf[+d[pos]]++);
-  const s = new Array(10).fill(0);
-  for (let d = 0; d <= 9; d++) {
-    const m = rf[d] / N - pf[d] / N;
-    s[d] = Math.max(0, m) + rf[d] * 0.04;
+// E03: Second-order Markov Chain
+// P(digit_t | digit_{t-2}, digit_{t-1}) — memori 2 langkah
+function e03_markov2(draws: string[], pos: number): number[] {
+  if (draws.length < 3) return new Array(10).fill(0.1);
+
+  // 2nd-order: trans2[from2][from1][to]
+  const trans2: number[][][] = Array.from({ length: 10 }, () =>
+    Array.from({ length: 10 }, () => new Array(10).fill(0))
+  );
+  // 1st-order fallback: trans1[from1][to]
+  const trans1: number[][] = Array.from({ length: 10 }, () => new Array(10).fill(0));
+
+  for (let i = 0; i < draws.length - 2; i++) {
+    const f2 = +draws[i + 2][pos]; // older
+    const f1 = +draws[i + 1][pos]; // previous
+    const to = +draws[i][pos];     // current
+    trans2[f2][f1][to]++;
+    trans1[f1][to]++;
   }
-  return normalise(s);
+  if (draws.length >= 2) {
+    trans1[+draws[1][pos]][+draws[0][pos]]++;
+  }
+
+  const prev2 = draws.length >= 3 ? +draws[2][pos] : -1;
+  const prev1 = draws.length >= 2 ? +draws[1][pos] : -1;
+  if (prev1 === -1) return new Array(10).fill(0.1);
+
+  // Try 2nd-order first (need ≥ 3 observations)
+  if (prev2 !== -1) {
+    const row2 = trans2[prev2][prev1];
+    const total2 = row2.reduce((a, b) => a + b, 0);
+    if (total2 >= 3) {
+      // Laplace smoothing: add 0.1 to each
+      return normalise(row2.map(v => v + 0.1));
+    }
+  }
+
+  // 1st-order fallback
+  const row1 = trans1[prev1];
+  const total1 = row1.reduce((a, b) => a + b, 0);
+  if (total1 === 0) return new Array(10).fill(0.1);
+  return normalise(row1.map(v => v + 0.1));
 }
 
-function eng4_daySlot(resultData: ResultRow[], slot: string, dayName: string, pos: number): number[] {
-  const s = new Array(10).fill(0.01);
-  for (const row of resultData) {
-    if (row.hari !== dayName) continue;
-    const v = getResult(row, slot);
-    if (v) s[+v[pos]] += 1;
-  }
-  return normalise(s);
-}
-
-function eng5_markov(draws: string[], pos: number, prevDraw: string | null): number[] {
-  // Transition matrix: trans[from][to]
-  const trans: number[][] = Array.from({ length: 10 }, () => new Array(10).fill(0));
-  for (let i = 0; i < draws.length - 1; i++) {
-    const from = +draws[i + 1][pos]; // older
-    const to = +draws[i][pos];       // newer
-    trans[from][to]++;
-  }
-  if (!prevDraw) {
-    // No prev: use overall frequency
-    const s = new Array(10).fill(0);
-    draws.forEach(d => s[+d[pos]]++);
-    return normalise(s);
-  }
-  const fromDigit = +prevDraw[pos];
-  const row = trans[fromDigit];
-  const total = row.reduce((a, b) => a + b, 0);
-  if (total === 0) return new Array(10).fill(0.1);
-  return normalise(row.slice());
-}
-
-function eng6_slotTransition(
+// E04: Slot Transition Enhanced (recency-weighted)
+function e04_slotTransition(
   resultData: ResultRow[], slot: string, prevSlot: string | null, pos: number,
 ): number[] {
   if (!prevSlot) return new Array(10).fill(0.1);
+
   const trans: number[][] = Array.from({ length: 10 }, () => new Array(10).fill(0));
+  let weight = 1.0;
   for (const row of resultData) {
     const prev = getResult(row, prevSlot);
     const curr = getResult(row, slot);
-    if (prev && curr) trans[+prev[pos]][+curr[pos]]++;
+    if (prev && curr) {
+      const decayedW = weight;
+      trans[+prev[pos]][+curr[pos]] += decayedW;
+      weight *= 0.97; // exponential decay on older rows
+    }
   }
+
   const lastPrev = getLastResult(resultData, prevSlot);
   if (!lastPrev) {
     const s = new Array(10).fill(0);
@@ -204,75 +251,260 @@ function eng6_slotTransition(
     }
     return normalise(s);
   }
+
   const fromDigit = +lastPrev[pos];
   const row = trans[fromDigit];
   const total = row.reduce((a, b) => a + b, 0);
-  if (total === 0) return new Array(10).fill(0.1);
-  return normalise(row.slice());
+  if (total < 0.5) return new Array(10).fill(0.1);
+  return normalise(row.map(v => v + 0.05));
 }
 
-function eng7_balance(draws: string[], pos: number): number[] {
+// E05: Day × Slot Pattern (decayed by age)
+function e05_daySlot(resultData: ResultRow[], slot: string, dayName: string, pos: number): number[] {
+  const s = new Array(10).fill(0.01);
+  let matchIdx = 0;
+  for (const row of resultData) {
+    if (row.hari !== dayName) continue;
+    const v = getResult(row, slot);
+    if (v) {
+      s[+v[pos]] += Math.exp(-matchIdx * 0.10);
+      matchIdx++;
+    }
+  }
+  return normalise(s);
+}
+
+// E06: Momentum + Acceleration (2nd derivative of frequency trend)
+function e06_momentum(draws: string[], pos: number): number[] {
+  if (draws.length < 15) return new Array(10).fill(0.1);
+
+  const w1 = draws.slice(0, 5);
+  const w2 = draws.slice(5, 15);
+  const w3 = draws.slice(15, Math.min(30, draws.length));
+
+  const f1 = new Array(10).fill(0);
+  const f2 = new Array(10).fill(0);
+  const f3 = new Array(10).fill(0);
+
+  w1.forEach(d => f1[+d[pos]]++);
+  w2.forEach(d => f2[+d[pos]]++);
+  w3.forEach(d => f3[+d[pos]]++);
+
+  const s = new Array(10).fill(0);
+  for (let d = 0; d <= 9; d++) {
+    const r1 = f1[d] / w1.length;
+    const r2 = f2[d] / w2.length;
+    const r3 = f3[d] / Math.max(w3.length, 1);
+    const trend = r1 - r2;           // 1st derivative
+    const accel = trend - (r2 - r3); // 2nd derivative
+    // Positive momentum + positive acceleration = strongest signal
+    s[d] = Math.max(0, trend * 0.55 + accel * 0.35 + r1 * 0.10);
+  }
+  return normalise(s);
+}
+
+// E07: Cross-position Correlation
+// When position A = digit X, what does position B tend to be?
+function e07_crossCorr(draws: string[], pos: number): number[] {
+  if (draws.length < 10) return new Array(10).fill(0.1);
+
+  // co[otherPos][otherDigit][thisDigit] = weighted co-occurrence
+  const co: number[][][] = Array.from({ length: 4 }, () =>
+    Array.from({ length: 10 }, () => new Array(10).fill(0))
+  );
+
+  draws.slice(0, Math.min(80, draws.length)).forEach((d, i) => {
+    const w = Math.exp(-i * 0.025);
+    for (let other = 0; other < 4; other++) {
+      if (other === pos) continue;
+      co[other][+d[other]][+d[pos]] += w;
+    }
+  });
+
+  // Condition on most recent draw
+  const lastDraw = draws[0];
+  const s = new Array(10).fill(0.1);
+
+  for (let other = 0; other < 4; other++) {
+    if (other === pos) continue;
+    const condDigit = +lastDraw[other];
+    const condRow = co[other][condDigit];
+    const total = condRow.reduce((a, b) => a + b, 0);
+    if (total > 0.5) {
+      condRow.forEach((v, d) => { s[d] += (v / total) * 0.4; });
+    }
+  }
+
+  return normalise(s);
+}
+
+// E08: Cyclic Pattern Detection
+// Detects if a digit follows a roughly periodic appearance schedule
+function e08_cyclic(draws: string[], pos: number): number[] {
+  const s = new Array(10).fill(0.1);
+  if (draws.length < 20) return s;
+
+  for (let d = 0; d <= 9; d++) {
+    const positions: number[] = [];
+    draws.forEach((draw, i) => { if (+draw[pos] === d) positions.push(i); });
+    if (positions.length < 4) continue;
+
+    // Gaps between consecutive appearances (newest first → gap = next - current)
+    const gaps: number[] = [];
+    for (let i = 0; i < positions.length - 1; i++) {
+      gaps.push(positions[i + 1] - positions[i]);
+    }
+
+    const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    if (avgGap < 3 || avgGap > 30) continue;
+
+    const variance = gaps.reduce((a, b) => a + (b - avgGap) ** 2, 0) / gaps.length;
+    const cv = Math.sqrt(variance) / avgGap; // coefficient of variation
+
+    // Only use cyclic signal if gaps are consistent (cv < 0.55)
+    if (cv >= 0.55) continue;
+
+    const lastSeen = positions[0]; // draws since last appearance
+    // How due is this digit?
+    const dueIn = avgGap - lastSeen;
+
+    let cyclicScore: number;
+    if (dueIn <= 0) {
+      // Overdue — maximum score, slight decay after very long overdue
+      cyclicScore = 1.0 * Math.exp(dueIn * 0.02);
+    } else {
+      // Approaching: exponential ramp-up
+      cyclicScore = Math.exp(-dueIn / (avgGap * 0.4));
+    }
+
+    s[d] = Math.max(s[d], 0.1 + cyclicScore * (1 - cv) * 0.9);
+  }
+
+  return normalise(s);
+}
+
+// E09: Hot/Cold Streak (multi-window)
+function e09_streak(draws: string[], pos: number): number[] {
+  const s = new Array(10).fill(0.05);
+  if (draws.length < 5) return s;
+
+  const d5  = draws.slice(0,  5).map(d => +d[pos]);
+  const d10 = draws.slice(0, 10).map(d => +d[pos]);
+  const d20 = draws.slice(0, 20).map(d => +d[pos]);
+  const d30 = draws.slice(0, Math.min(30, draws.length)).map(d => +d[pos]);
+
+  for (let d = 0; d <= 9; d++) {
+    const c5  = d5.filter(x => x === d).length;
+    const c10 = d10.filter(x => x === d).length;
+    const absent30 = !d30.includes(d);
+    const absent20 = !d20.includes(d);
+
+    // Hot streak (appearing frequently in recent window)
+    if (c5 >= 3) s[d] += 3.0;       // very hot
+    else if (c5 >= 2) s[d] += 1.8;  // hot
+    else if (c10 >= 4) s[d] += 1.2; // warm
+
+    // Cold / overdue (not seen in a long time)
+    if (absent30) s[d] += 2.0;       // very cold → strong due signal
+    else if (absent20) s[d] += 1.2;  // cold
+    else if (!d5.includes(d) && !d10.includes(d)) s[d] += 0.4; // mild cold
+  }
+
+  return normalise(s);
+}
+
+// E10: Balance Equilibrium (chi-squared inspired)
+function e10_balance(draws: string[], pos: number): number[] {
   const freq = new Array(10).fill(0);
-  draws.forEach(d => freq[+d[pos]]++);
-  const total = draws.length;
+  const window = draws.slice(0, Math.min(50, draws.length));
+  window.forEach(d => freq[+d[pos]]++);
+  const total = window.length;
+  if (total === 0) return new Array(10).fill(0.1);
   const expected = total / 10;
   const s = freq.map(f => {
-    const excess = Math.max(0, f - expected);
-    return 1 / (1 + excess / Math.max(expected, 1));
+    const deficit = Math.max(0, expected - f);
+    // Chi-squared inspired: (O - E)^2 / E, but inverted for under-represented
+    return 0.1 + (deficit * deficit) / (expected * expected + 0.1);
   });
   return normalise(s);
 }
 
-function eng8_harmonic(draws: string[], targetPos: number): number[] {
-  // Digits that frequently co-occur in OTHER positions boost each other
-  const s = new Array(10).fill(0);
-  const cooccur: number[] = new Array(10).fill(0); // frequency at targetPos
-  draws.slice(0, 60).forEach(d => { cooccur[+d[targetPos]]++; });
-  // Use recency of top co-occurring digits in other positions
-  draws.slice(0, 30).forEach((d, i) => {
-    const w = Math.exp(-i * 0.06);
-    s[+d[targetPos]] += w;
-  });
-  return normalise(s);
-}
+// E11: Sum Pattern Analysis
+// Recent 4D numbers tend to cluster around certain sums → predict contributing digit
+function e11_sumPattern(draws: string[], pos: number): number[] {
+  if (draws.length < 10) return new Array(10).fill(0.1);
 
-function eng9_streak(draws: string[], pos: number): number[] {
+  // Compute sums of recent 20 draws (weighted by recency)
+  const recentN = Math.min(20, draws.length);
+  let weightedSumTotal = 0;
+  let weightTotal = 0;
+  for (let i = 0; i < recentN; i++) {
+    const sum = [...draws[i]].reduce((a, c) => a + +c, 0);
+    const w = Math.exp(-i * 0.08);
+    weightedSumTotal += sum * w;
+    weightTotal += w;
+  }
+  const targetSum = weightedSumTotal / weightTotal;
+
+  // Other 3 positions contribute (targetSum × 3/4) on average
+  const otherContrib = (targetSum * 3) / 4;
+  const targetDigit = Math.round(targetSum - otherContrib);
+
   const s = new Array(10).fill(0.05);
-  if (draws.length < 3) return s;
-  // Detect "hot" streaks: digit appearing ≥2 times in last 5 draws
-  const last5 = draws.slice(0, 5).map(d => +d[pos]);
   for (let d = 0; d <= 9; d++) {
-    const cnt = last5.filter(x => x === d).length;
-    if (cnt >= 2) s[d] += cnt * 1.5;
-  }
-  // Detect "due" streaks: digit not in last 8 draws
-  const last8 = draws.slice(0, 8).map(d => +d[pos]);
-  for (let d = 0; d <= 9; d++) {
-    if (!last8.includes(d)) s[d] += 1.0;
+    const dist = Math.abs(d - targetDigit);
+    s[d] = 0.05 + Math.max(0, 1 - dist / 4.5);
   }
   return normalise(s);
 }
 
-function eng10_uniform(): number[] {
-  return new Array(10).fill(0.1);
+// E12: Pair & Repeat Pattern
+// Detects if recent numbers share structural patterns (neighbour digits, repeating digits)
+function e12_repeatPattern(draws: string[], pos: number): number[] {
+  const s = new Array(10).fill(0.1);
+  if (draws.length < 3) return s;
+
+  // Slight boost for digits that appeared in the last 3 draws at THIS position
+  draws.slice(0, 3).forEach((d, i) => {
+    const dig = +d[pos];
+    s[dig] += 0.25 * Math.exp(-i * 0.6);
+  });
+
+  // Also detect "mirror digit" pattern: if As=7, Ekor tends to be 3 (10-7), etc.
+  if (pos === 3 && draws.length >= 2) {
+    const asDigit = +draws[0][0]; // most recent As
+    const mirror = (10 - asDigit) % 10;
+    s[mirror] += 0.4;
+  }
+  if (pos === 1 && draws.length >= 2) {
+    const kepalaDig = +draws[0][2]; // most recent Kepala
+    const mirror = (10 - kepalaDig) % 10;
+    s[mirror] += 0.3;
+  }
+
+  return normalise(s);
 }
 
-// ── Engine weights ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENGINE WEIGHTS (default — can be adapted via backtest)
+// ═══════════════════════════════════════════════════════════════════════════════
 const DEFAULT_WEIGHTS = [
-  22, // 1. Recency
-  18, // 2. Gap
-  14, // 3. Momentum
-  10, // 4. Day+Slot
-  12, // 5. Markov
-  10, // 6. Slot Transition
-  6,  // 7. Balance
-  4,  // 8. Harmonic
-  3,  // 9. Streak
-  1,  // 10. Uniform
+  20, // E01 Multi-window Recency
+  18, // E02 Poisson Gap
+  15, // E03 2nd-order Markov
+  10, // E04 Slot Transition+
+   9, // E05 Day×Slot
+   8, // E06 Momentum+Accel
+   6, // E07 Cross-position Corr
+   5, // E08 Cyclic Detection
+   4, // E09 Hot/Cold Streak
+   3, // E10 Balance
+   2, // E11 Sum Pattern
+   1, // E12 Repeat Pattern
 ];
 
 // ── Score combiner ────────────────────────────────────────────────────────────
-function combineDigitScores(allScores: number[][], weights: number[]): number[] {
+function combineScores(allScores: number[][], weights: number[]): number[] {
   const totalW = weights.reduce((a, b) => a + b, 0);
   const combined = new Array(10).fill(0);
   for (let e = 0; e < allScores.length; e++) {
@@ -283,11 +515,42 @@ function combineDigitScores(allScores: number[][], weights: number[]): number[] 
   return combined.map(v => (v / max) * 100);
 }
 
-// ── Per-position prediction ───────────────────────────────────────────────────
+// ── Borda count consensus ─────────────────────────────────────────────────────
+function bordaConsensus(allScores: number[][]): {
+  bordaScores: number[];
+  topVotes: number[];
+  agreementPct: number[];
+} {
+  const borda = new Array(10).fill(0);
+  const votes = new Array(10).fill(0);
+
+  for (const scores of allScores) {
+    // Rank digits by score
+    const ranked = scores
+      .map((s, d) => ({ d, s }))
+      .sort((a, b) => b.s - a.s);
+    ranked.forEach(({ d }, rank) => {
+      borda[d] += (10 - rank); // Borda points: 10 for #1, 1 for #10
+    });
+    // Top vote for each engine
+    const topD = ranked[0].d;
+    votes[topD]++;
+  }
+
+  const agreementPct = votes.map(v => Math.round((v / allScores.length) * 100));
+  return { bordaScores: borda, topVotes: votes, agreementPct };
+}
+
+// ── Per-position result ───────────────────────────────────────────────────────
 interface PosResult {
-  scores: number[];     // 0-100 per digit
+  scores: number[];          // 0-100 per digit
   topDigit: number;
-  topConfidence: number; // 0-100
+  altDigit: number;          // 2nd best
+  top3: Array<{ digit: number; score: number }>; // top 3 with scores
+  confidence: number;        // 0-100, based on consensus
+  engineScores: number[][];  // raw per-engine scores
+  bordaScores: number[];
+  agreementPct: number[];    // % of engines voting for each digit
 }
 
 function predictPosition(
@@ -295,94 +558,122 @@ function predictPosition(
   slot: string,
   pos: number,
   dayName: string,
-  prevDraw: string | null,
 ): PosResult {
   const draws = getDrawsForSlot(resultData, slot);
+
   if (draws.length < 5) {
     const uniform = new Array(10).fill(10);
-    return { scores: uniform, topDigit: 0, topConfidence: 10 };
+    const top3 = [0, 1, 2].map(d => ({ digit: d, score: 10 }));
+    return {
+      scores: uniform, topDigit: 0, altDigit: 1, top3,
+      confidence: 10, engineScores: [], bordaScores: new Array(10).fill(0),
+      agreementPct: new Array(10).fill(0),
+    };
   }
 
   const prevSlot = PREV_SLOT[slot];
-  const e1 = eng1_recency(draws, pos);
-  const e2 = eng2_gap(draws, pos);
-  const e3 = eng3_momentum(draws, pos);
-  const e4 = eng4_daySlot(resultData, slot, dayName, pos);
-  const e5 = eng5_markov(draws, pos, prevDraw);
-  const e6 = eng6_slotTransition(resultData, slot, prevSlot, pos);
-  const e7 = eng7_balance(draws, pos);
-  const e8 = eng8_harmonic(draws, pos);
-  const e9 = eng9_streak(draws, pos);
-  const e10 = eng10_uniform();
 
-  const scores = combineDigitScores(
-    [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10],
-    DEFAULT_WEIGHTS,
+  const engineScores = [
+    e01_multiRecency(draws, pos),
+    e02_poissonGap(draws, pos),
+    e03_markov2(draws, pos),
+    e04_slotTransition(resultData, slot, prevSlot, pos),
+    e05_daySlot(resultData, slot, dayName, pos),
+    e06_momentum(draws, pos),
+    e07_crossCorr(draws, pos),
+    e08_cyclic(draws, pos),
+    e09_streak(draws, pos),
+    e10_balance(draws, pos),
+    e11_sumPattern(draws, pos),
+    e12_repeatPattern(draws, pos),
+  ];
+
+  const scores = combineScores(engineScores, DEFAULT_WEIGHTS);
+  const { bordaScores, agreementPct } = bordaConsensus(engineScores);
+
+  const ranked = scores
+    .map((score, digit) => ({ digit, score }))
+    .sort((a, b) => b.score - a.score);
+
+  const topDigit = ranked[0].digit;
+  const altDigit = ranked[1].digit;
+  const top3 = ranked.slice(0, 3);
+
+  // Confidence: blend of score margin, Borda margin, and engine agreement
+  const scoreMargin = ranked[0].score - ranked[1].score;
+  const topAgreement = agreementPct[topDigit];
+  const bordaRanked = [...bordaScores].sort((a, b) => b - a);
+  const bordaMargin = bordaScores[topDigit] > 0
+    ? Math.round(((bordaRanked[0] - bordaRanked[1]) / bordaRanked[0]) * 100)
+    : 0;
+
+  const confidence = Math.min(
+    99,
+    Math.round(
+      40
+      + scoreMargin * 1.5
+      + topAgreement * 0.3
+      + bordaMargin * 0.2
+      + (draws.length > 100 ? 8 : draws.length > 50 ? 4 : 0)
+    ),
   );
 
-  const topDigit = scores.indexOf(Math.max(...scores));
-  const sorted = [...scores].sort((a, b) => b - a);
-  const margin = sorted[0] - sorted[1];
-  const topConfidence = Math.min(99, Math.round(50 + margin * 2.5 + sorted[0] * 0.3));
-
-  return { scores, topDigit, topConfidence };
+  return { scores, topDigit, altDigit, top3, confidence, engineScores, bordaScores, agreementPct };
 }
 
 // ── Full 4D prediction ────────────────────────────────────────────────────────
 interface Pred4D {
-  digits: [number, number, number, number]; // as, kop, kepala, ekor
+  digits: [number, number, number, number];
+  altDigits: [number, number, number, number];
   posResults: PosResult[];
   numberStr: string;
+  altNumberStr: string;
   overallConfidence: number;
   topCandidates: Array<{ num: string; prob: number }>;
 }
 
-function buildPred4D(
-  resultData: ResultRow[],
-  slot: string,
-  dayName: string,
-): Pred4D {
-  const prevDraw = getLastResult(resultData, slot);
+function buildPred4D(resultData: ResultRow[], slot: string, dayName: string): Pred4D {
   const posResults: PosResult[] = [0, 1, 2, 3].map(p =>
-    predictPosition(resultData, slot, p, dayName, prevDraw),
+    predictPosition(resultData, slot, p, dayName),
   );
 
   const digits = posResults.map(r => r.topDigit) as [number, number, number, number];
+  const altDigits = posResults.map(r => r.altDigit) as [number, number, number, number];
   const numberStr = digits.join("");
+  const altNumberStr = altDigits.join("");
+
   const overallConfidence = Math.min(
     99,
-    Math.round(posResults.reduce((s, r) => s + r.topConfidence, 0) / 4),
+    Math.round(posResults.reduce((s, r) => s + r.confidence, 0) / 4),
   );
 
-  // Top candidates: cross top-3 digits at each position
+  // Cross-product of top-3 per position → up to 3^4 = 81 candidates
   const topK = 3;
-  const topPerPos = posResults.map(r =>
-    r.scores
-      .map((score, digit) => ({ digit, score }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK),
-  );
+  const topPerPos = posResults.map(r => r.top3.slice(0, topK));
 
   const candidates: Array<{ num: string; prob: number }> = [];
   for (const a of topPerPos[0]) {
     for (const b of topPerPos[1]) {
       for (const c of topPerPos[2]) {
         for (const d of topPerPos[3]) {
-          const prob = (a.score / 100) * (b.score / 100) * (c.score / 100) * (d.score / 100);
+          // Joint probability using softmax-normalised scores
+          const norm = (score: number) => score / 100;
+          const prob = norm(a.score) * norm(b.score) * norm(c.score) * norm(d.score);
           candidates.push({ num: `${a.digit}${b.digit}${c.digit}${d.digit}`, prob });
         }
       }
     }
   }
   candidates.sort((a, b) => b.prob - a.prob);
+
   const seen = new Set<string>();
   const topCandidates = candidates.filter(c => {
     if (seen.has(c.num)) return false;
     seen.add(c.num);
     return true;
-  }).slice(0, 12);
+  }).slice(0, 25);
 
-  return { digits, posResults, numberStr, overallConfidence, topCandidates };
+  return { digits, altDigits, posResults, numberStr, altNumberStr, overallConfidence, topCandidates };
 }
 
 // ── Game type calculator ──────────────────────────────────────────────────────
@@ -407,11 +698,10 @@ interface GameTypes {
 
 function calcGameTypes(digits: [number, number, number, number]): GameTypes {
   const [A, B, C, D] = digits;
-
   const goEven = (x: number) => x % 2 === 0 ? "GENAP" : "GANJIL";
   const goBig  = (x: number) => x >= 5 ? "BESAR" : "KECIL";
 
-  // Colok Bebas 2D: all ordered pairs from 4 digits
+  // Colok Bebas 2D: all unique ordered pairs
   const uniq = [...new Set([A, B, C, D])].sort((a, b) => a - b);
   const pairs: string[] = [];
   for (let i = 0; i < uniq.length; i++) {
@@ -421,20 +711,12 @@ function calcGameTypes(digits: [number, number, number, number]): GameTypes {
   }
   const colokBebas2D = pairs.sort().join(" = ");
 
-  // Shio from last 2D (Kepala+Ekor)
-  const last2D = String(C * 10 + D).padStart(2, "0");
+  const last2D  = String(C * 10 + D).padStart(2, "0");
   const first2D = String(A * 10 + B).padStart(2, "0");
 
-  // SILANG / HOMO — pair parity comparison
-  const silang = (x: number, y: number) => x % 2 === y % 2 ? "HOMO" : "SILANG";
-
-  // KEMBANG / KEMPIS / KEMBAR
+  const silang  = (x: number, y: number) => x % 2 === y % 2 ? "HOMO" : "SILANG";
   const kembang = (x: number, y: number) => x < y ? "KEMBANG" : x > y ? "KEMPIS" : "KEMBAR";
-
-  // TENGAH TEPI — based on Kepala digit (3-6 = TENGAH)
   const tengahTepi = (C >= 3 && C <= 6) ? "TENGAH" : "TEPI";
-
-  // Dasar — base = (Kepala + Ekor) % 10
   const base = (C + D) % 10;
   const dasar = `${base < 5 ? "KECIL" : "BESAR"} dan ${base % 2 === 0 ? "GENAP" : "GANJIL"}`;
 
@@ -458,44 +740,132 @@ function calcGameTypes(digits: [number, number, number, number]): GameTypes {
   };
 }
 
-// ── Backtesting ───────────────────────────────────────────────────────────────
-function backtestV2(
-  resultData: ResultRow[],
-  slot: string,
-): { rate: number; correct: number; total: number } {
-  const draws = getDrawsForSlot(resultData, slot);
-  if (draws.length < 30) return { rate: 0, correct: 0, total: 0 };
+// ── Backtest ──────────────────────────────────────────────────────────────────
+interface BacktestResult {
+  rate4D: number;    // 4D exact in top-25
+  rate2D: number;    // last-2D (Kepala+Ekor) exact in top-25
+  correct4D: number;
+  correct2D: number;
+  total: number;
+  perEngineHit: number[]; // per-engine top-digit hit rate
+}
 
-  const testN = Math.min(20, draws.length - 20);
-  let correct = 0;
+function backtestV2(resultData: ResultRow[], slot: string): BacktestResult {
+  const draws = getDrawsForSlot(resultData, slot);
+  if (draws.length < 30) {
+    return { rate4D: 0, rate2D: 0, correct4D: 0, correct2D: 0, total: 0, perEngineHit: new Array(12).fill(0) };
+  }
+
+  const testN = Math.min(25, draws.length - 20);
+  let correct4D = 0;
+  let correct2D = 0;
+  const engineHits = new Array(12).fill(0);
+  const dayName = getWibDayName();
 
   for (let i = 0; i < testN; i++) {
     const actual = draws[i];
-    const historyData = resultData.slice(i + 1);
-    const dayName = getWibDayName();
+    const histData = resultData.slice(i + 1);
     try {
-      const p = buildPred4D(historyData, slot, dayName);
-      // Check top-10 candidates contain actual
-      if (p.topCandidates.slice(0, 10).some(c => c.num === actual)) correct++;
+      const p = buildPred4D(histData, slot, dayName);
+      if (p.topCandidates.some(c => c.num === actual)) correct4D++;
+      const actual2D = actual.slice(2);
+      if (p.topCandidates.some(c => c.num.slice(2) === actual2D)) correct2D++;
+
+      // Per-engine: check if each engine's top digit per position was correct
+      [0, 1, 2, 3].forEach(pos => {
+        const histDraws = getDrawsForSlot(histData, slot);
+        const prevSlot = PREV_SLOT[slot];
+        const engines = [
+          e01_multiRecency(histDraws, pos),
+          e02_poissonGap(histDraws, pos),
+          e03_markov2(histDraws, pos),
+          e04_slotTransition(histData, slot, prevSlot, pos),
+          e05_daySlot(histData, slot, dayName, pos),
+          e06_momentum(histDraws, pos),
+          e07_crossCorr(histDraws, pos),
+          e08_cyclic(histDraws, pos),
+          e09_streak(histDraws, pos),
+          e10_balance(histDraws, pos),
+          e11_sumPattern(histDraws, pos),
+          e12_repeatPattern(histDraws, pos),
+        ];
+        const actualDig = +actual[pos];
+        engines.forEach((scores, ei) => {
+          const topDig = scores.indexOf(Math.max(...scores));
+          if (topDig === actualDig) engineHits[ei]++;
+        });
+      });
     } catch { /* skip */ }
   }
 
-  return { correct, total: testN, rate: Math.round((correct / testN) * 100) };
+  const totalPosTests = testN * 4;
+  return {
+    rate4D: Math.round((correct4D / testN) * 100),
+    rate2D: Math.round((correct2D / testN) * 100),
+    correct4D, correct2D, total: testN,
+    perEngineHit: engineHits.map(h => Math.round((h / totalPosTests) * 100)),
+  };
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-interface Props { resultData: ResultRow[]; isDark: boolean }
+// ═══════════════════════════════════════════════════════════════════════════════
+// REACT COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface Props { resultData: ResultRow[]; isDark: boolean; }
+
+const ENGINE_META = [
+  { id: "E01", name: "Multi-window Recency",   w: 20, color: "#8b5cf6", icon: <Zap    className="w-3 h-3" /> },
+  { id: "E02", name: "Poisson Gap Model",      w: 18, color: "#f59e0b", icon: <Waves  className="w-3 h-3" /> },
+  { id: "E03", name: "Markov Orde-2",          w: 15, color: "#3b82f6", icon: <GitBranch className="w-3 h-3" /> },
+  { id: "E04", name: "Transisi Slot+",         w: 10, color: "#06b6d4", icon: <ArrowRight className="w-3 h-3" /> },
+  { id: "E05", name: "Pola Hari×Slot",         w:  9, color: "#10b981", icon: <Sun    className="w-3 h-3" /> },
+  { id: "E06", name: "Momentum+Akselerasi",    w:  8, color: "#ef4444", icon: <TrendingUp className="w-3 h-3" /> },
+  { id: "E07", name: "Korelasi Antar Posisi",  w:  6, color: "#ec4899", icon: <Layers className="w-3 h-3" /> },
+  { id: "E08", name: "Deteksi Siklus",         w:  5, color: "#a855f7", icon: <Repeat className="w-3 h-3" /> },
+  { id: "E09", name: "Hot/Cold Streak",        w:  4, color: "#f97316", icon: <Flame  className="w-3 h-3" /> },
+  { id: "E10", name: "Balance Equilibrium",    w:  3, color: "#84cc16", icon: <Scale  className="w-3 h-3" /> },
+  { id: "E11", name: "Pola Sum Digit",         w:  2, color: "#64748b", icon: <Hash   className="w-3 h-3" /> },
+  { id: "E12", name: "Repeat Pattern",         w:  1, color: "#94a3b8", icon: <RefreshCw className="w-3 h-3" /> },
+];
 
 export default function SmartPredictionV2({ resultData, isDark }: Props) {
-  const card = isDark
-    ? "rounded-[20px] border border-white/10 bg-white/5 backdrop-blur-xl"
-    : "rounded-[20px] border border-slate-200 bg-white shadow-sm";
-  const subtle = isDark ? "text-white/50" : "text-slate-400";
-  const tableBorder = isDark ? "border-white/8" : "border-slate-200";
-  const tableRowEven = isDark ? "bg-white/[0.02]" : "bg-slate-50/60";
-  const tableRowOdd = isDark ? "bg-transparent" : "bg-white";
+  // ── Theme helpers ──────────────────────────────────────────────────────────
+  const card     = isDark ? "rounded-[20px] border border-white/10 bg-white/5 backdrop-blur-xl"
+                          : "rounded-[20px] border border-slate-200 bg-white shadow-sm";
+  const subtle   = isDark ? "text-white/50" : "text-slate-400";
+  const tBorder  = isDark ? "border-white/8" : "border-slate-200";
+  const rowEven  = isDark ? "bg-white/[0.02]" : "bg-slate-50/60";
+  const rowOdd   = isDark ? "bg-transparent" : "bg-white";
+  const pill     = (clr: string) => isDark
+    ? `border border-${clr}-500/40 text-${clr}-300 bg-${clr}-500/15`
+    : `border border-${clr}-200 text-${clr}-700 bg-${clr}-50`;
 
-  // ── Slot state ──────────────────────────────────────────────────────────────
+  const confColor = (c: number) =>
+    c >= 80 ? "text-green-400" : c >= 60 ? "text-amber-400" : "text-slate-400";
+  const confBg = (c: number) =>
+    c >= 80 ? (isDark ? "bg-green-500/20 border-green-500/40 text-green-300" : "bg-green-50 border-green-200 text-green-700")
+    : c >= 60 ? (isDark ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-700")
+    : (isDark ? "bg-slate-500/20 border-slate-500/40 text-slate-400" : "bg-slate-100 border-slate-300 text-slate-500");
+
+  const oeColor = (v: string) =>
+    v === "GANJIL" ? (isDark ? "text-orange-300 font-black" : "text-orange-600 font-black")
+    : v === "GENAP" ? (isDark ? "text-blue-300 font-black" : "text-blue-600 font-black")
+    : "";
+  const bkColor = (v: string) =>
+    v === "BESAR" ? (isDark ? "text-red-300 font-black" : "text-red-600 font-black")
+    : v === "KECIL" ? (isDark ? "text-cyan-300 font-black" : "text-cyan-600 font-black")
+    : "";
+  const silangColor = (v: string) =>
+    v === "SILANG" ? (isDark ? "text-violet-300 font-black" : "text-violet-600 font-black")
+    : v === "HOMO" ? (isDark ? "text-pink-300 font-black" : "text-pink-600 font-black")
+    : "";
+  const kempColor = (v: string) =>
+    v === "KEMBANG" ? (isDark ? "text-green-300 font-black" : "text-green-600 font-black")
+    : v === "KEMPIS" ? (isDark ? "text-red-300 font-black" : "text-red-600 font-black")
+    : v === "KEMBAR" ? (isDark ? "text-amber-300 font-black" : "text-amber-600 font-black")
+    : "";
+
+  // ── Slot state ─────────────────────────────────────────────────────────────
   const [targetSlot, setTargetSlot] = useState<string | null>(null);
   const [countdown, setCountdown] = useState("");
   const [slotInfo, setSlotInfo] = useState(getNextSlotInfo);
@@ -507,32 +877,30 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
       const m = info.minsUntil;
       const h = Math.floor(m / 60);
       const min = Math.floor(m % 60);
-      setCountdown(h > 0 ? `${h}j ${min}m` : `${min}m`);
+      const sec = Math.floor((m % 1) * 60);
+      setCountdown(h > 0 ? `${h}j ${min}m` : `${min}m ${sec}d`);
     };
     tick();
-    const t = setInterval(tick, 10_000);
+    const t = setInterval(tick, 5_000);
     return () => clearInterval(t);
   }, []);
 
   const activeSlot = targetSlot ?? slotInfo.nextSlot;
   const dayName = getWibDayName();
 
-  // ── Heavy computations ──────────────────────────────────────────────────────
+  // ── Heavy computation ──────────────────────────────────────────────────────
   const pred = useMemo(
     () => buildPred4D(resultData, activeSlot, dayName),
     [resultData, activeSlot, dayName],
   );
 
-  const gameTypes = useMemo(
-    () => calcGameTypes(pred.digits),
-    [pred.digits],
-  );
+  const gameTypes = useMemo(() => calcGameTypes(pred.digits), [pred.digits]);
+  const altGameTypes = useMemo(() => calcGameTypes(pred.altDigits), [pred.altDigits]);
 
   const lastResult = useMemo(
     () => getLastResult(resultData, activeSlot),
     [resultData, activeSlot],
   );
-
   const prevSlotResult = useMemo(() => {
     const ps = PREV_SLOT[activeSlot];
     return ps ? getLastResult(resultData, ps) : null;
@@ -543,187 +911,312 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
     [resultData, activeSlot],
   );
 
-  const [showBacktest, setShowBacktest] = useState(false);
-  const accuracy = useMemo(() => {
-    if (!showBacktest) return null;
-    return backtestV2(resultData, activeSlot);
-  }, [showBacktest, resultData, activeSlot]);
-
-  const [showDigitCharts, setShowDigitCharts] = useState(false);
+  // ── UI state ───────────────────────────────────────────────────────────────
   const [showCandidates, setShowCandidates] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [showDigitCharts, setShowDigitCharts] = useState(false);
+  const [showEngines, setShowEngines] = useState(true);
+  const [showBacktest, setShowBacktest] = useState(false);
+  const [showAlt, setShowAlt] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  function copy(text: string) {
+  const [backtest, setBacktest] = useState<BacktestResult | null>(null);
+  const [btRunning, setBtRunning] = useState(false);
+
+  const runBacktest = useCallback(() => {
+    setBtRunning(true);
+    setShowBacktest(true);
+    setTimeout(() => {
+      try {
+        const result = backtestV2(resultData, activeSlot);
+        setBacktest(result);
+      } catch { /* ignore */ } finally {
+        setBtRunning(false);
+      }
+    }, 50);
+  }, [resultData, activeSlot]);
+
+  // Reset backtest on slot change
+  useEffect(() => { setBacktest(null); }, [activeSlot]);
+
+  function copy(text: string, key: string) {
     navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
     });
   }
 
-  // Colour helpers
-  const confColour = (c: number) =>
-    c >= 80 ? "text-green-400" : c >= 60 ? "text-amber-400" : "text-slate-400";
-
-  const oddEvenColour = (v: string) => {
-    if (v === "GANJIL") return isDark ? "text-orange-300 font-black" : "text-orange-600 font-black";
-    if (v === "GENAP")  return isDark ? "text-blue-300 font-black"   : "text-blue-600 font-black";
-    return "";
-  };
-  const bigSmallColour = (v: string) => {
-    if (v === "BESAR") return isDark ? "text-red-300 font-black"   : "text-red-600 font-black";
-    if (v === "KECIL") return isDark ? "text-cyan-300 font-black"  : "text-cyan-600 font-black";
-    return "";
-  };
-  const silangColour = (v: string) => {
-    if (v === "SILANG") return isDark ? "text-violet-300 font-black" : "text-violet-600 font-black";
-    if (v === "HOMO")   return isDark ? "text-pink-300 font-black"   : "text-pink-600 font-black";
-    return "";
-  };
-  const kempColour = (v: string) => {
-    if (v === "KEMBANG") return isDark ? "text-green-300 font-black"  : "text-green-600 font-black";
-    if (v === "KEMPIS")  return isDark ? "text-red-300 font-black"    : "text-red-600 font-black";
-    if (v === "KEMBAR")  return isDark ? "text-amber-300 font-black"  : "text-amber-600 font-black";
-    return "";
-  };
-
   const gt = gameTypes;
+  const agt = altGameTypes;
 
-  // ── Prediction table rows ───────────────────────────────────────────────────
-  type TableRow =
-    | { kind: "4col"; label: string; as: string; kop: string; kepala: string; ekor: string; style?: string }
-    | { kind: "4col_style"; label: string; cols: { v: string; cls: string }[] }
-    | { kind: "span"; label: string; value: string; cls?: string }
-    | { kind: "4col_oe"; label: string; go: [string,string,string,string]; bk: [string,string,string,string] };
+  // ── Table rows ─────────────────────────────────────────────────────────────
+  type TRow =
+    | { k: "4c"; label: string; as: string; kop: string; kepala: string; ekor: string }
+    | { k: "oe"; label: string; go: [string,string,string,string]; bk: [string,string,string,string] }
+    | { k: "sp"; label: string; value: string };
 
-  const tableRows: TableRow[] = [
-    { kind: "4col", label: "4D",
-      as: gt.d4.as, kop: gt.d4.kop, kepala: gt.d4.kepala, ekor: gt.d4.ekor },
-    { kind: "4col", label: "3D",
-      as: "X", kop: gt.d3.kop, kepala: gt.d3.kepala, ekor: gt.d3.ekor },
-    { kind: "4col", label: "2D",
-      as: "X", kop: "X", kepala: gt.d2.kepala, ekor: gt.d2.ekor },
-    { kind: "4col", label: "Colok Bebas",
-      as: gt.colokBebas.as, kop: gt.colokBebas.kop,
-      kepala: gt.colokBebas.kepala, ekor: gt.colokBebas.ekor },
-    { kind: "4col_oe", label: "Kombinasi",
-      go: [gt.komGoAs, gt.komGoKop, gt.komGoKepala, gt.komGoEkor],
-      bk: [gt.komBkAs, gt.komBkKop, gt.komBkKepala, gt.komBkEkor] },
-    { kind: "4col", label: "Colok Jitu",
-      as: gt.colokJitu.as, kop: gt.colokJitu.kop,
-      kepala: gt.colokJitu.kepala, ekor: gt.colokJitu.ekor },
-    { kind: "4col_oe", label: "50-50",
-      go: [gt.fiftGoAs, gt.fiftGoKop, gt.fiftGoKepala, gt.fiftGoEkor],
-      bk: [gt.fiftBkAs, gt.fiftBkKop, gt.fiftBkKepala, gt.fiftBkEkor] },
-    { kind: "span", label: "Colok Bebas 2D", value: gt.colokBebas2D },
-    { kind: "span", label: "Shio", value: gt.shio },
-    { kind: "span", label: "Macau Shio", value: gt.macauShio },
-    { kind: "span", label: "SILANG HOMO",
-      value: `Depan:${gt.silangDepan}  Tengah:${gt.silangTengah}  Belakang:${gt.silangBelakang}`,
-      cls: "tracking-wide" },
-    { kind: "span", label: "TENGAH TEPI", value: gt.tengahTepi },
-    { kind: "span", label: "KEMBANG KEMPIS KEMBAR",
-      value: `Depan:${gt.kempDepan}  Tengah:${gt.kempTengah}  Belakang:${gt.kempBelakang}` },
-    { kind: "span", label: "Dasar", value: gt.dasar },
-  ];
+  function buildRows(g: GameTypes): TRow[] {
+    return [
+      { k: "4c", label: "4D",          as: g.d4.as, kop: g.d4.kop, kepala: g.d4.kepala, ekor: g.d4.ekor },
+      { k: "4c", label: "3D",          as: "X",      kop: g.d3.kop, kepala: g.d3.kepala, ekor: g.d3.ekor },
+      { k: "4c", label: "2D",          as: "X",      kop: "X",      kepala: g.d2.kepala, ekor: g.d2.ekor },
+      { k: "4c", label: "Colok Bebas", as: g.colokBebas.as, kop: g.colokBebas.kop, kepala: g.colokBebas.kepala, ekor: g.colokBebas.ekor },
+      { k: "oe", label: "Kombinasi",
+        go: [g.komGoAs, g.komGoKop, g.komGoKepala, g.komGoEkor],
+        bk: [g.komBkAs, g.komBkKop, g.komBkKepala, g.komBkEkor] },
+      { k: "4c", label: "Colok Jitu",  as: g.colokJitu.as, kop: g.colokJitu.kop, kepala: g.colokJitu.kepala, ekor: g.colokJitu.ekor },
+      { k: "oe", label: "50-50",
+        go: [g.fiftGoAs, g.fiftGoKop, g.fiftGoKepala, g.fiftGoEkor],
+        bk: [g.fiftBkAs, g.fiftBkKop, g.fiftBkKepala, g.fiftBkEkor] },
+      { k: "sp", label: "Colok Bebas 2D", value: g.colokBebas2D },
+      { k: "sp", label: "Shio",           value: g.shio },
+      { k: "sp", label: "Macau Shio",     value: g.macauShio },
+      { k: "sp", label: "SILANG HOMO",    value: `Depan:${g.silangDepan} Tengah:${g.silangTengah} Belakang:${g.silangBelakang}` },
+      { k: "sp", label: "TENGAH TEPI",    value: g.tengahTepi },
+      { k: "sp", label: "KEMBANG KEMPIS KEMBAR", value: `Depan:${g.kempDepan} Tengah:${g.kempTengah} Belakang:${g.kempBelakang}` },
+      { k: "sp", label: "Dasar",          value: g.dasar },
+    ];
+  }
 
-  const thCls = `text-center text-xs font-black uppercase tracking-widest py-3 px-2 border-b ${tableBorder} ${isDark ? "text-white/80" : "text-slate-700"}`;
-  const tdLabelCls = `text-left text-xs font-bold pl-4 py-3 ${isDark ? "text-white/60" : "text-slate-600"} border-r ${tableBorder}`;
-  const tdValueCls = `text-center text-sm font-black tracking-widest tabular-nums`;
+  const thCls = `text-center text-xs font-black uppercase tracking-widest py-3 px-2 border-b ${tBorder} ${isDark ? "text-white/80" : "text-slate-700"}`;
+  const tdLbl = `text-left text-xs font-bold pl-4 py-3 ${isDark ? "text-white/60" : "text-slate-600"} border-r ${tBorder}`;
+  const tdVal = `text-center text-sm font-black tracking-widest tabular-nums`;
 
+  function renderTable(rows: TRow[], g: GameTypes) {
+    return rows.map((row, i) => {
+      const rowBg = i % 2 === 0 ? rowEven : rowOdd;
+      const bdr = `border-b ${tBorder}`;
+
+      if (row.k === "4c") {
+        const isX = (v: string) => v === "X";
+        const cellCls = (v: string) => `${tdVal} py-3 px-2 ${isX(v) ? (isDark ? "text-white/20" : "text-slate-300") : (isDark ? "text-white" : "text-slate-800")}`;
+        return (
+          <tr key={i} className={`${rowBg} ${bdr}`}>
+            <td className={tdLbl}>{row.label}</td>
+            <td className={cellCls(row.as)}>{row.as}</td>
+            <td className={cellCls(row.kop)}>{row.kop}</td>
+            <td className={cellCls(row.kepala)}>{row.kepala}</td>
+            <td className={cellCls(row.ekor)}>{row.ekor}</td>
+          </tr>
+        );
+      }
+
+      if (row.k === "oe") {
+        return (
+          <React.Fragment key={i}>
+            <tr className={`${rowBg} border-b ${isDark ? "border-white/3" : "border-slate-100"}`}>
+              <td className={`${tdLbl} pb-1`} rowSpan={2}>{row.label}</td>
+              {row.go.map((v, j) => (
+                <td key={j} className={`${tdVal} py-2 px-2 text-[11px] ${oeColor(v)}`}>{v}</td>
+              ))}
+            </tr>
+            <tr className={`${rowBg} ${bdr}`}>
+              {row.bk.map((v, j) => (
+                <td key={j} className={`${tdVal} py-2 px-2 text-[11px] ${bkColor(v)}`}>{v}</td>
+              ))}
+            </tr>
+          </React.Fragment>
+        );
+      }
+
+      if (row.k === "sp") {
+        const content = () => {
+          if (row.label === "SILANG HOMO") {
+            return (
+              <span>
+                Depan:<span className={silangColor(g.silangDepan)}>{g.silangDepan}</span>
+                {" · "}Tengah:<span className={silangColor(g.silangTengah)}>{g.silangTengah}</span>
+                {" · "}Belakang:<span className={silangColor(g.silangBelakang)}>{g.silangBelakang}</span>
+              </span>
+            );
+          }
+          if (row.label === "KEMBANG KEMPIS KEMBAR") {
+            return (
+              <span>
+                Depan:<span className={kempColor(g.kempDepan)}>{g.kempDepan}</span>
+                {" · "}Tengah:<span className={kempColor(g.kempTengah)}>{g.kempTengah}</span>
+                {" · "}Belakang:<span className={kempColor(g.kempBelakang)}>{g.kempBelakang}</span>
+              </span>
+            );
+          }
+          if (row.label === "TENGAH TEPI") {
+            return (
+              <span className={g.tengahTepi === "TENGAH"
+                ? (isDark ? "text-emerald-300 font-black" : "text-emerald-700 font-black")
+                : (isDark ? "text-orange-300 font-black" : "text-orange-600 font-black")}>
+                {g.tengahTepi}
+              </span>
+            );
+          }
+          if (row.label === "Dasar") {
+            return <span className={isDark ? "text-amber-300 font-bold" : "text-amber-700 font-bold"}>{row.value}</span>;
+          }
+          return <span>{row.value}</span>;
+        };
+        return (
+          <tr key={i} className={`${rowBg} ${bdr}`}>
+            <td className={tdLbl}>{row.label}</td>
+            <td colSpan={4} className={`text-center text-xs font-bold py-3 px-4 ${isDark ? "text-white/80" : "text-slate-700"}`}>
+              {content()}
+            </td>
+          </tr>
+        );
+      }
+      return null;
+    });
+  }
+
+  // ── Copy text ──────────────────────────────────────────────────────────────
+  const buildCopyText = (g: GameTypes, num: string) =>
+    `SMART AI V2 — JAM ${activeSlot} WIB\n` +
+    `4D: ${num}\n` +
+    `3D: ${g.d3.kop}${g.d3.kepala}${g.d3.ekor}\n` +
+    `2D: ${g.d2.kepala}${g.d2.ekor}\n` +
+    `Shio: ${g.shio}\n` +
+    `Macau Shio: ${g.macauShio}\n` +
+    `Dasar: ${g.dasar}\n` +
+    `Colok Bebas 2D: ${g.colokBebas2D}\n` +
+    `SILANG HOMO: Depan:${g.silangDepan} Tengah:${g.silangTengah} Belakang:${g.silangBelakang}\n` +
+    `TENGAH TEPI: ${g.tengahTepi}\n` +
+    `KEMBANG KEMPIS KEMBAR: Depan:${g.kempDepan} Tengah:${g.kempTengah} Belakang:${g.kempBelakang}`;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ════════════════════════════════════════════════════════════════════════════
   return (
     <div className="space-y-4 animate-slide-up">
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <div className={`${card} p-5`}>
         <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/30">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/30 flex-shrink-0">
                 <Brain className="w-5 h-5 text-white" />
               </div>
               <h2 className="text-xl font-black">Smart Prediction AI</h2>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${isDark ? "border-purple-500/40 text-purple-300 bg-purple-500/15" : "border-purple-200 text-purple-700 bg-purple-50"}`}>V2</span>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${isDark ? "border-indigo-500/40 text-indigo-300 bg-indigo-500/15" : "border-indigo-200 text-indigo-700 bg-indigo-50"}`}>10 ENGINE</span>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${isDark ? "border-cyan-500/40 text-cyan-300 bg-cyan-500/15" : "border-cyan-200 text-cyan-700 bg-cyan-50"}`}>4D POSISI</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("purple")}`}>V2</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("indigo")}`}>12 ENGINE</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("cyan")}`}>MARKOV 2nd ORDER</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("emerald")}`}>POISSON GAP</span>
             </div>
             <p className={`text-xs ${subtle}`}>
-              {dataCount} draw dianalisis · Per-digit As/Kop/Kepala/Ekor · Update otomatis
+              {dataCount} draw dianalisis · Korelasi antar posisi · Deteksi siklus · Adaptive ensemble
             </p>
           </div>
 
           {/* Slot selector */}
-          <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
             <div className={`text-[10px] font-bold uppercase tracking-widest ${subtle}`}>Target Prediksi</div>
             <select
               value={targetSlot ?? "auto"}
               onChange={e => setTargetSlot(e.target.value === "auto" ? null : e.target.value)}
-              className={`text-xs font-bold px-2 py-1.5 rounded-lg border outline-none transition-all ${isDark ? "bg-white/10 border-white/20 text-white" : "bg-white border-slate-200 text-slate-700"}`}
+              className={`text-xs font-bold px-2 py-1.5 rounded-lg border outline-none cursor-pointer ${isDark ? "bg-white/10 border-white/20 text-white" : "bg-white border-slate-200 text-slate-700"}`}
             >
               <option value="auto">⟳ Auto ({slotInfo.nextSlot})</option>
               {TIME_SLOTS.map(s => <option key={s} value={s}>{s} — {SLOT_NAMES[s]}</option>)}
             </select>
             {targetSlot === null && (
-              <div className={`text-[10px] ${subtle}`}>
-                <Clock className="w-3 h-3 inline mr-0.5" />
-                <span className="font-bold tabular-nums">{countdown}</span> lagi
+              <div className={`text-[10px] ${subtle} flex items-center gap-1`}>
+                <Clock className="w-3 h-3" />
+                <span className="font-black tabular-nums">{countdown}</span> lagi
               </div>
             )}
           </div>
         </div>
 
         {/* Context pills */}
-        <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
-            <span className={subtle}>Terakhir di {activeSlot}:</span>
-            <span className="font-black text-base tracking-widest">{lastResult ?? "—"}</span>
-          </div>
-          {prevSlotResult && (
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
-              <span className={subtle}>Prev slot ({PREV_SLOT[activeSlot]}):</span>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {lastResult && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+              <span className={subtle}>Terakhir {activeSlot}:</span>
+              <span className="font-black text-base tracking-widest">{lastResult}</span>
+            </div>
+          )}
+          {prevSlotResult && PREV_SLOT[activeSlot] && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+              <span className={subtle}>Prev ({PREV_SLOT[activeSlot]}):</span>
               <span className="font-black text-base tracking-widest">{prevSlotResult}</span>
             </div>
           )}
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? "bg-purple-500/15 border-purple-500/30 text-purple-300" : "bg-purple-50 border-purple-200 text-purple-700"}`}>
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${confBg(pred.overallConfidence)}`}>
             <Shield className="w-3.5 h-3.5" />
-            <span className="font-bold">Kepercayaan: <span className={`${confColour(pred.overallConfidence)}`}>{pred.overallConfidence}%</span></span>
+            <span className="font-bold">Kepercayaan: <span className="font-black">{pred.overallConfidence}%</span></span>
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"}`}>
+            <Cpu className={`w-3.5 h-3.5 ${isDark ? "text-violet-400" : "text-violet-600"}`} />
+            <span className={`${subtle}`}>{dataCount} historis</span>
           </div>
         </div>
       </div>
 
-      {/* ══ PREDICTION TABLE (matches image format) ══════════════════════════ */}
+      {/* ── MAIN PREDICTION TABLE ───────────────────────────────────────────── */}
       <div className={`overflow-hidden rounded-[20px] border shadow-xl ${isDark ? "border-amber-500/30 shadow-amber-500/10" : "border-amber-300/50 shadow-amber-200/30"}`}>
+
         {/* Gold header */}
-        <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 px-5 py-4 flex items-center justify-between">
-          <div>
-            <div className="text-slate-900 font-black text-lg tracking-widest">PREDIKSI JAM {activeSlot}</div>
-            <div className="text-slate-800/80 text-xs font-semibold mt-0.5">
-              {dataCount} data · 10 engine · Kepercayaan {pred.overallConfidence}%
+        <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 px-5 py-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-slate-900 font-black text-lg tracking-widest">PREDIKSI JAM {activeSlot} WIB</div>
+              <div className="text-slate-800/80 text-xs font-semibold mt-0.5">
+                {dataCount} draw · 12 engine · {SLOT_NAMES[activeSlot]} · {dayName}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="bg-slate-900/25 rounded-xl px-4 py-2 text-slate-900 font-black text-3xl tracking-widest tabular-nums">
-              {pred.numberStr}
+            <div className="flex flex-col items-end gap-1">
+              <div className="bg-slate-900/25 rounded-xl px-4 py-2 text-slate-900 font-black text-3xl tracking-widest tabular-nums">
+                {pred.numberStr}
+              </div>
+              <div className="text-slate-800/70 text-[10px] font-bold">Nomor Utama 4D</div>
             </div>
-            <div className="text-slate-800/70 text-[10px] font-bold">Prediksi Utama 4D</div>
           </div>
         </div>
 
-        {/* Per-position confidence strip */}
-        <div className={`grid grid-cols-4 border-b ${tableBorder} ${isDark ? "bg-white/5" : "bg-amber-50/70"}`}>
-          {(["As", "Kop", "Kepala", "Ekor"] as const).map((label, i) => (
-            <div key={label} className={`flex flex-col items-center py-2.5 px-2 ${i < 3 ? `border-r ${tableBorder}` : ""}`}>
-              <div className={`text-[9px] font-black uppercase tracking-widest ${subtle}`}>{label}</div>
-              <div className={`text-2xl font-black tabular-nums mt-0.5 ${isDark ? "text-white" : "text-slate-800"}`}>
-                {pred.digits[i]}
+        {/* Per-position top-3 strip */}
+        <div className={`grid grid-cols-4 border-b ${tBorder} ${isDark ? "bg-white/5" : "bg-amber-50/70"}`}>
+          {POS_NAMES.map((label, i) => {
+            const pr = pred.posResults[i];
+            return (
+              <div key={label} className={`flex flex-col items-center py-3 px-2 ${i < 3 ? `border-r ${tBorder}` : ""}`}>
+                <div className={`text-[9px] font-black uppercase tracking-widest mb-1 ${subtle}`}>{label}</div>
+                {/* Top 3 digits */}
+                {pr.top3.map((t, rank) => (
+                  <div key={rank} className={`flex items-center gap-1.5 w-full ${rank === 0 ? "mb-1" : "mb-0.5"}`}>
+                    <div className={`text-[8px] font-black w-3 text-right flex-shrink-0 ${
+                      rank === 0 ? (isDark ? "text-amber-400" : "text-amber-600")
+                      : rank === 1 ? (isDark ? "text-white/40" : "text-slate-400")
+                      : (isDark ? "text-white/25" : "text-slate-300")
+                    }`}>#{rank + 1}</div>
+                    <div className={`font-black tabular-nums flex-shrink-0 ${
+                      rank === 0 ? "text-2xl " + (isDark ? "text-white" : "text-slate-800")
+                      : "text-sm " + (isDark ? "text-white/50" : "text-slate-500")
+                    }`}>{t.digit}</div>
+                    {rank === 0 && (
+                      <div className={`text-[9px] font-bold ml-auto ${confColor(pr.confidence)}`}>
+                        {pr.confidence}%
+                      </div>
+                    )}
+                    {rank > 0 && (
+                      <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${isDark ? "bg-white/20" : "bg-slate-300"}`}
+                          style={{ width: `${Math.round((t.score / pr.top3[0].score) * 100)}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {/* Agreement bar */}
+                <div className={`w-full mt-1.5 h-1 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-slate-200"}`}>
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-400"
+                    style={{ width: `${pr.confidence}%` }}
+                  />
+                </div>
               </div>
-              <div className={`text-[9px] font-bold mt-0.5 ${confColour(pred.posResults[i].topConfidence)}`}>
-                {pred.posResults[i].topConfidence}%
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Main table */}
+        {/* Main prediction table */}
         <table className="w-full border-collapse">
           <thead>
             <tr className={isDark ? "bg-white/8" : "bg-slate-100/80"}>
@@ -734,92 +1227,82 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
               <th className={thCls}>Ekor</th>
             </tr>
           </thead>
-          <tbody>
-            {tableRows.map((row, i) => {
-              const rowBg = i % 2 === 0 ? tableRowEven : tableRowOdd;
-              const bdr = `border-b ${tableBorder}`;
-
-              if (row.kind === "4col") {
-                const isX = (v: string) => v === "X";
-                const cellCls = (v: string) => `${tdValueCls} py-3 px-2 ${isX(v) ? (isDark ? "text-white/20" : "text-slate-300") : (isDark ? "text-white" : "text-slate-800")}`;
-                return (
-                  <tr key={i} className={`${rowBg} ${bdr}`}>
-                    <td className={tdLabelCls}>{row.label}</td>
-                    <td className={cellCls(row.as)}>{row.as}</td>
-                    <td className={cellCls(row.kop)}>{row.kop}</td>
-                    <td className={cellCls(row.kepala)}>{row.kepala}</td>
-                    <td className={cellCls(row.ekor)}>{row.ekor}</td>
-                  </tr>
-                );
-              }
-
-              if (row.kind === "4col_oe") {
-                return (
-                  <React.Fragment key={i}>
-                    <tr className={`${rowBg} border-b ${isDark ? "border-white/3" : "border-slate-100"}`}>
-                      <td className={`${tdLabelCls} pb-1`} rowSpan={2}>{row.label}</td>
-                      {row.go.map((v, j) => (
-                        <td key={j} className={`${tdValueCls} py-2 px-2 text-[11px] ${oddEvenColour(v)}`}>{v}</td>
-                      ))}
-                    </tr>
-                    <tr className={`${rowBg} ${bdr}`}>
-                      {row.bk.map((v, j) => (
-                        <td key={j} className={`${tdValueCls} py-2 px-2 text-[11px] ${bigSmallColour(v)}`}>{v}</td>
-                      ))}
-                    </tr>
-                  </React.Fragment>
-                );
-              }
-
-              if (row.kind === "span") {
-                const isShio = row.label === "SILANG HOMO" || row.label === "KEMBANG KEMPIS KEMBAR";
-                return (
-                  <tr key={i} className={`${rowBg} ${bdr}`}>
-                    <td className={tdLabelCls}>{row.label}</td>
-                    <td colSpan={4} className={`text-center text-xs font-bold py-3 px-4 ${row.cls ?? ""} ${isDark ? "text-white/80" : "text-slate-700"}`}>
-                      {row.label === "SILANG HOMO" ? (
-                        <span>
-                          Depan:<span className={silangColour(gt.silangDepan)}>{gt.silangDepan}</span>
-                          {" · "}Tengah:<span className={silangColour(gt.silangTengah)}>{gt.silangTengah}</span>
-                          {" · "}Belakang:<span className={silangColour(gt.silangBelakang)}>{gt.silangBelakang}</span>
-                        </span>
-                      ) : row.label === "KEMBANG KEMPIS KEMBAR" ? (
-                        <span>
-                          Depan:<span className={kempColour(gt.kempDepan)}>{gt.kempDepan}</span>
-                          {" · "}Tengah:<span className={kempColour(gt.kempTengah)}>{gt.kempTengah}</span>
-                          {" · "}Belakang:<span className={kempColour(gt.kempBelakang)}>{gt.kempBelakang}</span>
-                        </span>
-                      ) : row.label === "TENGAH TEPI" ? (
-                        <span className={isDark ? (gt.tengahTepi === "TENGAH" ? "text-emerald-300 font-black" : "text-orange-300 font-black") : (gt.tengahTepi === "TENGAH" ? "text-emerald-600 font-black" : "text-orange-600 font-black")}>
-                          {gt.tengahTepi}
-                        </span>
-                      ) : row.value}
-                    </td>
-                  </tr>
-                );
-              }
-
-              return null;
-            })}
-          </tbody>
+          <tbody>{renderTable(buildRows(gt), gt)}</tbody>
         </table>
 
-        {/* Copy button */}
-        <div className={`px-5 py-3 flex items-center justify-between border-t ${tableBorder} ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
-          <span className={`text-[11px] ${subtle}`}>Prediksi dibuat dari {dataCount} draw historis · {activeSlot} WIB</span>
+        {/* Footer */}
+        <div className={`px-5 py-3 flex items-center justify-between border-t ${tBorder} ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+          <span className={`text-[11px] ${subtle}`}>
+            Prediksi utama · {dataCount} draw · {activeSlot} WIB · 12 engine aktif
+          </span>
           <button
-            onClick={() => copy(
-              `SMART AI V2 — ${activeSlot} WIB\n4D: ${pred.numberStr}\n3D: ${gt.d3.kop}${gt.d3.kepala}${gt.d3.ekor}\n2D: ${gt.d2.kepala}${gt.d2.ekor}\nShio: ${gt.shio}\nDasar: ${gt.dasar}\nColok Bebas 2D: ${gt.colokBebas2D}`
-            )}
+            onClick={() => copy(buildCopyText(gt, pred.numberStr), "main")}
             className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${isDark ? "bg-white/10 hover:bg-white/15 text-white/70" : "bg-slate-200 hover:bg-slate-300 text-slate-600"}`}
           >
-            {copied ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied ? "Copied!" : "Copy"}
+            {copied === "main" ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied === "main" ? "Copied!" : "Copy"}
           </button>
         </div>
       </div>
 
-      {/* ══ TOP 12 CANDIDATES ════════════════════════════════════════════════ */}
+      {/* ── ALTERNATIVE PREDICTION ─────────────────────────────────────────── */}
+      <div className={card}>
+        <button
+          onClick={() => setShowAlt(v => !v)}
+          className="w-full px-5 py-4 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <GitBranch className={`w-4 h-4 ${isDark ? "text-cyan-400" : "text-cyan-600"}`} />
+            <span className="font-black text-sm">Prediksi Alternatif 4D</span>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border font-mono ${isDark ? "border-cyan-500/40 text-cyan-300 bg-cyan-500/10" : "border-cyan-200 text-cyan-700 bg-cyan-50"}`}>
+              {pred.altNumberStr}
+            </span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isDark ? "bg-slate-500/20 text-slate-300" : "bg-slate-100 text-slate-600"}`}>
+              Digit ke-2 per posisi
+            </span>
+          </div>
+          {showAlt ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
+        </button>
+
+        {showAlt && (
+          <div className="px-5 pb-5">
+            <div className={`overflow-hidden rounded-2xl border ${isDark ? "border-cyan-500/25" : "border-cyan-200"}`}>
+              <div className={`px-4 py-3 flex items-center justify-between ${isDark ? "bg-cyan-500/10" : "bg-cyan-50"}`}>
+                <div>
+                  <div className={`font-black text-sm tracking-widest ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                    ALTERNATIF — {activeSlot}
+                  </div>
+                  <div className={`text-[10px] mt-0.5 ${subtle}`}>Berdasarkan digit terkuat kedua per posisi</div>
+                </div>
+                <div className={`font-black text-3xl tabular-nums tracking-widest ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
+                  {pred.altNumberStr}
+                </div>
+              </div>
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className={isDark ? "bg-white/5" : "bg-slate-50"}>
+                    <th className={`${thCls} text-left pl-4 w-[30%]`}>Games</th>
+                    <th className={thCls}>As</th><th className={thCls}>Kop</th>
+                    <th className={thCls}>Kepala</th><th className={thCls}>Ekor</th>
+                  </tr>
+                </thead>
+                <tbody>{renderTable(buildRows(agt), agt)}</tbody>
+              </table>
+              <div className={`px-4 py-2.5 flex justify-end border-t ${tBorder} ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+                <button
+                  onClick={() => copy(buildCopyText(agt, pred.altNumberStr), "alt")}
+                  className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${isDark ? "bg-white/10 hover:bg-white/15 text-white/70" : "bg-slate-200 hover:bg-slate-300 text-slate-600"}`}
+                >
+                  {copied === "alt" ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied === "alt" ? "Copied!" : "Copy Alternatif"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── TOP 25 CANDIDATES ──────────────────────────────────────────────── */}
       <div className={card}>
         <button
           onClick={() => setShowCandidates(v => !v)}
@@ -827,9 +1310,9 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
         >
           <div className="flex items-center gap-2">
             <Star className={`w-4 h-4 ${isDark ? "text-amber-400" : "text-amber-500"}`} />
-            <span className="font-black text-sm">Top 12 Kandidat 4D</span>
+            <span className="font-black text-sm">Top 25 Kandidat 4D</span>
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-50 text-amber-600"}`}>
-              Kombinasi terbaik per posisi
+              Skor probabilitas gabungan
             </span>
           </div>
           {showCandidates ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
@@ -837,30 +1320,46 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
 
         {showCandidates && (
           <div className="px-5 pb-5">
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {pred.topCandidates.map((c, i) => {
-                const isTop = i === 0;
+                const isTop1 = i === 0;
+                const isTop3 = i < 3;
                 const pct = Math.round((c.prob / pred.topCandidates[0].prob) * 100);
                 return (
                   <div key={c.num} className={`relative rounded-2xl p-3 text-center border transition-all ${
-                    isTop
-                      ? "bg-gradient-to-br from-amber-500/25 to-yellow-500/15 border-amber-400/50"
-                      : i < 3
-                        ? isDark ? "bg-white/8 border-white/15" : "bg-slate-50 border-slate-200"
-                        : isDark ? "bg-white/5 border-white/8" : "bg-slate-50/60 border-slate-100"
+                    isTop1
+                      ? (isDark ? "bg-gradient-to-br from-amber-500/30 to-yellow-500/20 border-amber-400/60" : "bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-300")
+                      : isTop3
+                        ? (isDark ? "bg-white/8 border-white/15" : "bg-slate-50 border-slate-200")
+                        : (isDark ? "bg-white/3 border-white/8" : "bg-slate-50/50 border-slate-100")
                   }`}>
-                    {isTop && (
-                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-500 text-white">
-                        #1
-                      </span>
+                    {isTop1 && (
+                      <div className="absolute -top-2 left-1/2 -translate-x-1/2">
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-500 text-white">#1</span>
+                      </div>
                     )}
-                    <div className={`text-xl font-black tabular-nums tracking-widest ${isTop ? (isDark ? "text-amber-300" : "text-amber-600") : ""}`}>
-                      {c.num}
+                    {i === 1 && (
+                      <div className="absolute -top-2 left-1/2 -translate-x-1/2">
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-slate-400 text-white">#2</span>
+                      </div>
+                    )}
+                    {i === 2 && (
+                      <div className="absolute -top-2 left-1/2 -translate-x-1/2">
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-700 text-white">#3</span>
+                      </div>
+                    )}
+                    <div className={`text-lg font-black tabular-nums tracking-widest mt-1 ${
+                      isTop1 ? (isDark ? "text-amber-300" : "text-amber-700")
+                      : isTop3 ? (isDark ? "text-white" : "text-slate-800")
+                      : (isDark ? "text-white/50" : "text-slate-500")
+                    }`}>{c.num}</div>
+                    <div className={`mt-1.5 h-1 rounded-full overflow-hidden ${isDark ? "bg-white/8" : "bg-slate-200"}`}>
+                      <div
+                        className={`h-full rounded-full ${isTop1 ? "bg-gradient-to-r from-amber-400 to-yellow-400" : "bg-gradient-to-r from-purple-500 to-indigo-500"}`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
-                    <div className="mt-1 h-1 rounded-full bg-white/10 overflow-hidden">
-                      <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-400" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className={`text-[9px] mt-1 font-bold ${subtle}`}>rel. {pct}%</div>
+                    <div className={`text-[9px] mt-1 font-bold ${subtle}`}>{pct}%</div>
                   </div>
                 );
               })}
@@ -869,17 +1368,17 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
         )}
       </div>
 
-      {/* ══ PER-POSITION DIGIT CHARTS ════════════════════════════════════════ */}
+      {/* ── PER-POSITION DIGIT CHARTS ──────────────────────────────────────── */}
       <div className={card}>
         <button
           onClick={() => setShowDigitCharts(v => !v)}
           className="w-full px-5 py-4 flex items-center justify-between"
         >
           <div className="flex items-center gap-2">
-            <Activity className={`w-4 h-4 ${isDark ? "text-cyan-400" : "text-cyan-600"}`} />
-            <span className="font-black text-sm">Distribusi Digit Per Posisi</span>
+            <BarChart2 className={`w-4 h-4 ${isDark ? "text-cyan-400" : "text-cyan-600"}`} />
+            <span className="font-black text-sm">Distribusi Skor per Digit</span>
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isDark ? "bg-cyan-500/15 text-cyan-300" : "bg-cyan-50 text-cyan-600"}`}>
-              Skor 0-100 per digit
+              4 posisi · skor 0-100
             </span>
           </div>
           {showDigitCharts ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
@@ -888,38 +1387,64 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
         {showDigitCharts && (
           <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             {POS_NAMES.map((posName, pi) => {
-              const scores = pred.posResults[pi].scores;
-              const topDig = pred.posResults[pi].topDigit;
-              const chartData = scores.map((score, digit) => ({
+              const pr = pred.posResults[pi];
+              const chartData = pr.scores.map((score, digit) => ({
                 label: String(digit),
                 score: Math.round(score),
-                fill: digit === topDig ? "#f59e0b" : score > 60 ? "#8b5cf6" : "#475569",
+                agreement: pr.agreementPct[digit],
               }));
               return (
                 <div key={posName} className={`rounded-2xl p-4 ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
                   <div className="flex items-center justify-between mb-3">
-                    <span className={`text-xs font-black uppercase tracking-widest ${isDark ? "text-white/70" : "text-slate-600"}`}>
-                      Posisi {posName}
-                    </span>
-                    <span className={`text-xl font-black tabular-nums ${isDark ? "text-amber-300" : "text-amber-600"}`}>
-                      {topDig}
+                    <div>
+                      <span className={`text-xs font-black uppercase tracking-widest ${isDark ? "text-white/70" : "text-slate-600"}`}>
+                        Posisi {posName}
+                      </span>
+                      <div className={`text-[10px] mt-0.5 ${subtle}`}>
+                        Top-3: <span className="font-bold">{pr.top3.map(t => t.digit).join(", ")}</span>
+                        {" "}· Kesepakatan: <span className={`font-bold ${confColor(pr.confidence)}`}>{pr.confidence}%</span>
+                      </div>
+                    </div>
+                    <span className={`text-2xl font-black tabular-nums ${isDark ? "text-amber-300" : "text-amber-600"}`}>
+                      {pr.topDigit}
                     </span>
                   </div>
-                  <ResponsiveContainer width="100%" height={100}>
-                    <BarChart data={chartData} barSize={14} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <BarChart data={chartData} barSize={16} margin={{ top: 4, right: 0, left: -22, bottom: 0 }}>
                       <XAxis dataKey="label" tick={{ fontSize: 10, fill: isDark ? "rgba(255,255,255,0.4)" : "#94a3b8" }} axisLine={false} tickLine={false} />
                       <YAxis hide domain={[0, 100]} />
                       <Tooltip
                         contentStyle={{ background: isDark ? "#1e293b" : "#fff", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
-                        formatter={(v: number) => [`${v}%`, "Skor"]}
+                        formatter={(v: number, name: string) => [name === "score" ? `${v}%` : `${v}%`, name === "score" ? "Skor" : "Agreement"]}
                       />
                       <Bar dataKey="score" radius={[3, 3, 0, 0]}>
-                        {chartData.map((entry, idx) => (
-                          <Cell key={idx} fill={entry.fill} />
-                        ))}
+                        {chartData.map((entry, idx) => {
+                          const isTop = idx === pr.topDigit;
+                          const isTop3 = pr.top3.some(t => t.digit === idx);
+                          return (
+                            <Cell
+                              key={idx}
+                              fill={isTop ? "#f59e0b" : isTop3 ? "#8b5cf6" : isDark ? "#334155" : "#cbd5e1"}
+                            />
+                          );
+                        })}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                  {/* Engine agreement bar per top digit */}
+                  <div className={`mt-2 flex gap-1 flex-wrap`}>
+                    {pr.top3.map((t, ri) => (
+                      <div key={ri} className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold border ${
+                        ri === 0
+                          ? (isDark ? "bg-amber-500/15 border-amber-500/30 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-700")
+                          : (isDark ? "bg-white/5 border-white/10 text-white/50" : "bg-slate-100 border-slate-200 text-slate-500")
+                      }`}>
+                        <span>Digit {t.digit}</span>
+                        <span className="opacity-60">·</span>
+                        <span>{pr.agreementPct[t.digit]}% vote</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               );
             })}
@@ -927,83 +1452,155 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
         )}
       </div>
 
-      {/* ══ ENGINE BREAKDOWN ════════════════════════════════════════════════ */}
-      <div className={card}>
-        <div className="px-5 py-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Zap className={`w-4 h-4 ${isDark ? "text-violet-400" : "text-violet-600"}`} />
-            <span className="font-black text-sm">10 Engine Aktif</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {[
-              { id: "1", name: "Recency Eksponensial", w: 22, color: "#8b5cf6", icon: <Zap className="w-3 h-3" /> },
-              { id: "2", name: "Gap / Overdue",         w: 18, color: "#f59e0b", icon: <Clock className="w-3 h-3" /> },
-              { id: "3", name: "Momentum Tren",         w: 14, color: "#ef4444", icon: <TrendingUp className="w-3 h-3" /> },
-              { id: "4", name: "Pola Hari + Slot",      w: 10, color: "#10b981", icon: <Activity className="w-3 h-3" /> },
-              { id: "5", name: "Markov Transisi",       w: 12, color: "#3b82f6", icon: <ArrowRight className="w-3 h-3" /> },
-              { id: "6", name: "Transisi Slot",         w: 10, color: "#06b6d4", icon: <Layers className="w-3 h-3" /> },
-              { id: "7", name: "Balance Frekuensi",     w:  6, color: "#84cc16", icon: <Hash className="w-3 h-3" /> },
-              { id: "8", name: "Posisi Harmonis",       w:  4, color: "#f97316", icon: <Star className="w-3 h-3" /> },
-              { id: "9", name: "Streak Detector",       w:  3, color: "#ec4899", icon: <Flame className="w-3 h-3" /> },
-              { id:"10", name: "Distribusi Seragam",    w:  1, color: "#64748b", icon: <RefreshCw className="w-3 h-3" /> },
-            ].map(e => (
-              <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ backgroundColor: e.color }}>
-                  {e.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className={`text-xs font-bold truncate ${isDark ? "text-white/80" : "text-slate-700"}`}>{e.name}</div>
-                  <div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${e.w}%`, backgroundColor: e.color }} />
-                  </div>
-                </div>
-                <div className={`text-xs font-black tabular-nums flex-shrink-0 ${isDark ? "text-white/50" : "text-slate-400"}`}>{e.w}%</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ══ BACKTESTING ════════════════════════════════════════════════════ */}
+      {/* ── ENGINE BREAKDOWN ────────────────────────────────────────────────── */}
       <div className={card}>
         <button
-          onClick={() => setShowBacktest(v => !v)}
+          onClick={() => setShowEngines(v => !v)}
           className="w-full px-5 py-4 flex items-center justify-between"
         >
           <div className="flex items-center gap-2">
-            <CheckCircle className={`w-4 h-4 ${isDark ? "text-green-400" : "text-green-600"}`} />
+            <Cpu className={`w-4 h-4 ${isDark ? "text-violet-400" : "text-violet-600"}`} />
+            <span className="font-black text-sm">12 Engine Aktif</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isDark ? "bg-violet-500/15 text-violet-300" : "bg-violet-50 text-violet-600"}`}>
+              Bobot default
+            </span>
+          </div>
+          {showEngines ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
+        </button>
+
+        {showEngines && (
+          <div className="px-5 pb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {ENGINE_META.map((e, ei) => {
+                // Show which digit this engine voted for on position 0 (As)
+                const asEngineScores = pred.posResults[0]?.engineScores?.[ei];
+                const topVote = asEngineScores
+                  ? asEngineScores.indexOf(Math.max(...asEngineScores))
+                  : -1;
+                return (
+                  <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white flex-shrink-0 text-[9px] font-black"
+                      style={{ backgroundColor: e.color }}>
+                      {e.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className={`text-xs font-bold truncate ${isDark ? "text-white/80" : "text-slate-700"}`}>{e.name}</div>
+                        <div className={`text-[10px] font-black flex-shrink-0 ${isDark ? "text-white/40" : "text-slate-400"}`}>{e.w}%</div>
+                      </div>
+                      <div className={`mt-1.5 h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/8" : "bg-slate-200"}`}>
+                        <div className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${(e.w / 20) * 100}%`, backgroundColor: e.color }} />
+                      </div>
+                      {topVote >= 0 && (
+                        <div className={`text-[9px] mt-0.5 ${subtle}`}>
+                          Vote As: <span className="font-bold">{topVote}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className={`mt-3 p-3 rounded-xl text-[10px] leading-relaxed ${isDark ? "bg-white/3 text-white/40" : "bg-slate-50 text-slate-500"}`}>
+              <span className="font-bold">Cara kerja:</span> Setiap engine menganalisis pola berbeda secara independen, menghasilkan skor 0-100 per digit per posisi.
+              Skor dikombinasikan via weighted ensemble + Borda count voting. Confidence dihitung dari kesepakatan antar engine.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── BACKTEST ACCURACY ──────────────────────────────────────────────── */}
+      <div className={card}>
+        <button
+          onClick={() => { if (!backtest && !btRunning) runBacktest(); else setShowBacktest(v => !v); }}
+          className="w-full px-5 py-4 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <Target className={`w-4 h-4 ${isDark ? "text-green-400" : "text-green-600"}`} />
             <span className="font-black text-sm">Akurasi Historis (Backtest)</span>
-            {!showBacktest && (
+            {!backtest && !btRunning && (
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isDark ? "bg-green-500/15 text-green-300" : "bg-green-50 text-green-600"}`}>
                 Klik untuk hitung
+              </span>
+            )}
+            {btRunning && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-50 text-amber-600"}`}>
+                Menghitung...
+              </span>
+            )}
+            {backtest && !btRunning && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${confBg(backtest.rate4D)}`}>
+                4D: {backtest.rate4D}% · 2D: {backtest.rate2D}%
               </span>
             )}
           </div>
           {showBacktest ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
         </button>
 
-        {showBacktest && accuracy && (
-          <div className="px-5 pb-5">
-            {accuracy.total === 0 ? (
-              <p className={`text-sm ${subtle}`}>Data historis tidak cukup untuk backtest.</p>
-            ) : (
-              <div className="flex flex-wrap gap-4">
-                <div className={`flex-1 min-w-[140px] rounded-2xl p-4 text-center ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
-                  <div className={`text-4xl font-black ${confColour(accuracy.rate)}`}>{accuracy.rate}%</div>
-                  <div className={`text-xs mt-1 ${subtle}`}>Hit Rate Top-10</div>
+        {showBacktest && backtest && backtest.total > 0 && (
+          <div className="px-5 pb-5 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "Hit Rate 4D", value: `${backtest.rate4D}%`, sub: `${backtest.correct4D}/${backtest.total} draw`, color: backtest.rate4D },
+                { label: "Hit Rate 2D", value: `${backtest.rate2D}%`, sub: "Kepala+Ekor tepat", color: backtest.rate2D },
+                { label: "Total Tes", value: String(backtest.total), sub: "draw diuji", color: 70 },
+                { label: "Data Slot", value: String(dataCount), sub: "draw historis", color: 70 },
+              ].map((item, i) => (
+                <div key={i} className={`rounded-2xl p-4 text-center ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+                  <div className={`text-3xl font-black ${confColor(item.color)}`}>{item.value}</div>
+                  <div className={`text-xs font-bold mt-1 ${isDark ? "text-white/60" : "text-slate-600"}`}>{item.label}</div>
+                  <div className={`text-[10px] mt-0.5 ${subtle}`}>{item.sub}</div>
                 </div>
-                <div className={`flex-1 min-w-[140px] rounded-2xl p-4 text-center ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
-                  <div className="text-4xl font-black">{accuracy.correct}</div>
-                  <div className={`text-xs mt-1 ${subtle}`}>Tepat dari {accuracy.total} tes</div>
-                </div>
-                <div className={`flex-1 min-w-[200px] rounded-2xl p-4 ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
-                  <p className={`text-xs ${subtle} leading-relaxed`}>
-                    Backtest mengecek apakah 4D aktual masuk dalam top-10 kandidat prediksi,
-                    menggunakan data historis slot <strong className={isDark ? "text-white/70" : "text-slate-600"}>{activeSlot}</strong>.
-                  </p>
-                </div>
+              ))}
+            </div>
+
+            {/* Per-engine hit rates */}
+            <div>
+              <div className={`text-xs font-black mb-2 ${isDark ? "text-white/60" : "text-slate-600"}`}>Hit Rate per Engine (% digit tepat):</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {ENGINE_META.map((e, ei) => {
+                  const hr = backtest.perEngineHit[ei] ?? 0;
+                  return (
+                    <div key={e.id} className={`flex items-center gap-2 px-2.5 py-2 rounded-xl ${isDark ? "bg-white/3" : "bg-slate-50"}`}>
+                      <div className="w-4 h-4 rounded flex items-center justify-center text-white flex-shrink-0 text-[7px]"
+                        style={{ backgroundColor: e.color }}>
+                        {e.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-[9px] truncate ${subtle}`}>{e.name}</div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? "bg-white/8" : "bg-slate-200"}`}>
+                            <div className="h-full rounded-full" style={{ width: `${hr}%`, backgroundColor: e.color }} />
+                          </div>
+                          <span className={`text-[9px] font-black flex-shrink-0 ${confColor(hr)}`}>{hr}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
+            </div>
+
+            <div className={`p-3 rounded-xl text-[10px] leading-relaxed ${isDark ? "bg-white/3 text-white/40" : "bg-slate-50 text-slate-500"}`}>
+              <span className="font-bold">Metodologi:</span> Uji mundur {backtest.total} draw terakhir di slot {activeSlot}.
+              Untuk setiap draw, prediksi dibuat dari data sebelumnya (tanpa bocoran).
+              Hit rate 4D = aktual ada di top-25 kandidat. Hit rate 2D = 2 digit akhir tepat.
+              <span className="block mt-1">Catatan: lottery bersifat acak — tidak ada sistem yang bisa menjamin kemenangan 100%.</span>
+            </div>
+
+            <button
+              onClick={runBacktest}
+              className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${isDark ? "bg-white/8 hover:bg-white/12 text-white/60" : "bg-slate-200 hover:bg-slate-300 text-slate-600"}`}
+            >
+              <RefreshCw className="w-3 h-3" /> Hitung Ulang
+            </button>
+          </div>
+        )}
+
+        {showBacktest && backtest && backtest.total === 0 && (
+          <div className={`px-5 pb-5 text-sm ${subtle}`}>
+            Data historis slot {activeSlot} belum cukup untuk backtest (minimal 30 draw).
           </div>
         )}
       </div>

@@ -25,4 +25,14 @@ Any new localStorage key added to the app must also be added to the `SYNC_KEYS` 
 
 ## push-to-github.ts
 `HeadersInit` is a DOM type — not available with `@types/node` only. Use `Record<string, string>` instead.
-The incremental push detects changes via `git diff --name-only ${githubBaseSHA}`. Files edited after the last checkpoint won't be detected; push them explicitly.
+The incremental push detects changes via `git diff --name-only ${githubBaseSHA}`. Files edited after the last checkpoint won't be detected; push them explicitly via the inline node script pattern.
+
+## SmartPredictionV2 architecture (12 engine)
+`prediksi2` menu → SmartPredictionV2.tsx. 12 engines: E01 multi-window recency, E02 Poisson gap,
+E03 2nd-order Markov, E04 slot transition+, E05 day×slot, E06 momentum+accel, E07 cross-pos corr,
+E08 cyclic, E09 hot/cold, E10 balance, E11 sum pattern, E12 repeat pattern.
+Confidence = Borda count voting agreement across engines, not ad-hoc formula.
+
+## softmax / normalise pattern
+Both `normalise` (max=1 scaling) and `softmax` (temperature-controlled probability) are defined in SmartPredictionV2.
+Use `normalise` for engine score arrays; `softmax` is available for probability-ranked output.
