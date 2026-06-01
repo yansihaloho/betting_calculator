@@ -1080,13 +1080,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
     return ps ? getLastResult(resultData, ps) : null;
   }, [resultData, activeSlot]);
 
-  // slotCount: draw slot-spesifik (untuk konteks E04/E05/E12)
-  // allDraws sudah dihitung di atas — ini yang dipakai semua engine utama
-  const slotCount = useMemo(
-    () => getDrawsForSlot(resultData, activeSlot).length,
-    [resultData, activeSlot],
-  );
-  // dataCount yang ditampilkan = total draw global (lebih merepresentasikan kekuatan analisis)
+  // dataCount: total draw global (lebih merepresentasikan kekuatan analisis semua engine)
   const dataCount = allDraws.length;
 
   // ── UI state ───────────────────────────────────────────────────────────────

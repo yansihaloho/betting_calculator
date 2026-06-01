@@ -61,7 +61,7 @@ export default function RumusPage({ resultData, isDark }: Props) {
   const tomorrowIdx = (todayIdx + 1) % 7;
 
   /* ── 1. Angka Mati (2D depan not seen in last 30 draws) ── */
-  const angraMatiData = useMemo(() => {
+  const angkaMatiData = useMemo(() => {
     const seen30 = new Set<string>();
     draws.slice(0, 30).forEach(d => seen30.add(d.slice(0,2)));
     const seen15 = new Set<string>();
@@ -371,7 +371,7 @@ export default function RumusPage({ resultData, isDark }: Props) {
           <SectionHdr id="mati" icon={<Snowflake className="w-4 h-4 text-white"/>}
             color="bg-gradient-to-br from-blue-600 to-cyan-700"
             title="Angka Mati & Overdue"
-            sub={`${angraMatiData.mati.length} nomor belum keluar dalam 30 draw`}/>
+            sub={`${angkaMatiData.mati.length} nomor belum keluar dalam 30 draw`}/>
           {openSection === "mati" && (
             <div className="px-4 pb-4 space-y-4">
               <div>
@@ -379,9 +379,9 @@ export default function RumusPage({ resultData, isDark }: Props) {
                   Angka Mati — tidak keluar dalam 30 draw terakhir
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {angraMatiData.mati.length === 0
+                  {angkaMatiData.mati.length === 0
                     ? <span className={`text-sm ${muted}`}>Semua nomor sudah pernah keluar dalam 30 draw</span>
-                    : angraMatiData.mati.map(x => (
+                    : angkaMatiData.mati.map(x => (
                       <NumBadge key={x.num} n={x.num} col="bg-blue-500/20 text-blue-400"/>
                     ))
                   }
@@ -392,7 +392,7 @@ export default function RumusPage({ resultData, isDark }: Props) {
                   Angka Paling Overdue — gap terpanjang sejak terakhir keluar
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {angraMatiData.overdue.map((x, i) => (
+                  {angkaMatiData.overdue.map((x, i) => (
                     <div key={x.num} className="flex flex-col items-center gap-0.5">
                       <span className={`inline-flex items-center justify-center w-11 h-11 rounded-xl text-sm font-black ${
                         i < 3 ? "bg-orange-500/25 text-orange-400" : isDark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"

@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from "react"
 import SaldoPage from "./SaldoPage";
 import LivePage from "./LivePage";
 import Prediksi from "./Prediksi";
-import Prediksi2 from "./Prediksi2";
 import PrediksiBerantai from "./PrediksiBerantai";
 import Prediksi3 from "./Prediksi3";
 import AnalisisNomor from "./AnalisisNomor";
