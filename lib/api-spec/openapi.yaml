@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: 4D Macau Strategi Dashboard — API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: results
+    description: Lottery result data
+  - name: user
+    description: Per-user data persistence
 paths:
   /healthz:
     get:
@@ -24,7 +28,93 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /results/toto-macau:
+    get:
+      operationId: getTotoMacauResults
+      tags: [results]
+      summary: Get Toto Macau draw results
+      description: Returns all stored draw results, newest first. Cached in-memory for 90 seconds.
+      responses:
+        "200":
+          description: List of draw results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultsResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /user/data:
+    get:
+      operationId: getUserData
+      tags: [user]
+      summary: Get authenticated user's saved data
+      description: Returns the user's persisted JSON data (session history, settings, etc.)
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: User data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDataResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: putUserData
+      tags: [user]
+      summary: Save authenticated user's data
+      description: Upserts the user's JSON data blob.
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserDataRequest"
+      responses:
+        "200":
+          description: Data saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required:
+                  - ok
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  securitySchemes:
+    clerkAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +124,56 @@ components:
       required:
         - status
 
+    ResultRow:
+      type: object
+      description: A single draw date row with slot results keyed by time (HH:MM)
+      properties:
+        hari:
+          type: string
+          description: Day name in Indonesian (e.g. "Senin")
+        tanggal:
+          type: string
+          description: Date in YYYY-MM-DD format
+      additionalProperties:
+        type: string
+        description: 4-digit draw result for each time slot
+      required:
+        - hari
+        - tanggal
+
+    ResultsResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResultRow"
+      required:
+        - results
+
+    UserDataRequest:
+      type: object
+      properties:
+        data:
+          type: object
+          description: Arbitrary JSON object to persist
+          additionalProperties: true
+      required:
+        - data
+
+    UserDataResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+      required:
+        - data
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
