@@ -26,7 +26,8 @@ import {
   Brain, Clock, Zap, TrendingUp, Hash, Layers,
   ArrowRight, RefreshCw, CheckCircle, Copy, ChevronDown, ChevronUp,
   Star, Activity, Flame, Shield, Target, BarChart2,
-  Cpu, GitBranch, Waves, Repeat, Scale, Sun, Database, Sparkles
+  Cpu, GitBranch, Waves, Repeat, Scale, Sun, Database, Sparkles,
+  FileDown, ClipboardCheck, XCircle, CheckCircle2, Trash2
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
@@ -34,6 +35,24 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ResultRow = { hari: string; tanggal: string; [slot: string]: string };
+
+interface EvalEntry {
+  id: string;
+  slot: string;
+  date: string;
+  predictedMain: string;
+  predictedAlt: string;
+  bbfs5: number[];
+  bbfs7: number[];
+  top25: string[];
+  timestamp: number;
+  actual?: string;
+  correct4D?: boolean;
+  correct2D?: boolean;
+  inTop25?: boolean;
+  inBBFS5?: boolean;
+  inBBFS7?: boolean;
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TIME_SLOTS = ["00:01", "13:00", "16:00", "19:00", "22:00", "23:00"];
@@ -1064,6 +1083,34 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [btRunning, setBtRunning] = useState(false);
 
+  // ── Evaluasi state ──────────────────────────────────────────────────────────
+  const [evals, setEvals] = useState<EvalEntry[]>(() => {
+    try { return JSON.parse(localStorage.getItem("smartai_evals") ?? "[]") as EvalEntry[]; }
+    catch { return []; }
+  });
+  const [showEval, setShowEval] = useState(false);
+  const [evalInput, setEvalInput] = useState<Record<string, string>>({});
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const evalStats = useMemo(() => {
+    const withActual = evals.filter(e => e.actual);
+    const total = withActual.length;
+    if (total === 0) return null;
+    const hit4D    = withActual.filter(e => e.correct4D).length;
+    const hit2D    = withActual.filter(e => e.correct2D).length;
+    const hitTop25 = withActual.filter(e => e.inTop25).length;
+    const hitBBFS5 = withActual.filter(e => e.inBBFS5).length;
+    const hitBBFS7 = withActual.filter(e => e.inBBFS7).length;
+    return {
+      total,
+      rate4D:    Math.round((hit4D    / total) * 100),
+      rate2D:    Math.round((hit2D    / total) * 100),
+      rateTop25: Math.round((hitTop25 / total) * 100),
+      rateBBFS5: Math.round((hitBBFS5 / total) * 100),
+      rateBBFS7: Math.round((hitBBFS7 / total) * 100),
+    };
+  }, [evals]);
+
   const runBacktest = useCallback(() => {
     setBtRunning(true);
     setShowBacktest(true);
@@ -1085,6 +1132,189 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
       setCopied(key);
       setTimeout(() => setCopied(null), 2000);
     });
+  }
+
+  // ── PDF Export ──────────────────────────────────────────────────────────────
+  function exportPDF() {
+    const timestamp = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+    const wibDate = new Date(Date.now() + WIB_MS);
+    const dateStr = wibDate.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+
+    const engineRows = ENGINE_META.map((e, ei) => {
+      const hr = backtest?.perEngineHit[ei] ?? 0;
+      const barColor = hr >= 60 ? "#22c55e" : hr >= 40 ? "#f59e0b" : "#ef4444";
+      return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:#64748b;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">${e.id}: ${e.name}</div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <div style="flex:1;height:4px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+            <div style="width:${hr}%;height:100%;background:${e.color};border-radius:3px"></div>
+          </div>
+          <span style="font-size:10px;font-weight:900;color:${barColor}">${hr}%</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    const backtestSection = backtest && backtest.total > 0 ? `
+      <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#475569;border-bottom:2px solid #e2e8f0;padding-bottom:5px;margin:18px 0 10px">
+        Akurasi Backtest (${backtest.total} Draw Terakhir Slot ${activeSlot})
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+        ${[
+          { l: "Hit Rate 4D", v: `${backtest.rate4D}%`, s: `${backtest.correct4D}/${backtest.total} draw` },
+          { l: "Hit Rate 2D", v: `${backtest.rate2D}%`, s: "Kepala+Ekor tepat" },
+          { l: "Total Tes",   v: String(backtest.total), s: "draw diuji" },
+          { l: "Data Slot",  v: String(dataCount), s: "draw historis" },
+        ].map(it => `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:20px;font-weight:900;color:#7c3aed">${it.v}</div>
+          <div style="font-size:9px;color:#475569;font-weight:700;margin-top:2px">${it.l}</div>
+          <div style="font-size:8px;color:#94a3b8">${it.s}</div>
+        </div>`).join("")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">${engineRows}</div>
+    ` : "";
+
+    const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Smart AI V2 — ${activeSlot} WIB ${dateStr}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff;padding:28px;max-width:820px;margin:0 auto;font-size:12px}
+  @media print{body{padding:0}}
+</style>
+</head>
+<body>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <h1 style="font-size:18px;font-weight:900;color:#7c3aed">🎯 Smart Prediction AI</h1>
+    <span style="font-size:9px;font-weight:900;padding:2px 8px;border-radius:20px;background:#ede9fe;color:#7c3aed">V2</span>
+    <span style="font-size:9px;font-weight:900;padding:2px 8px;border-radius:20px;background:#e0f2fe;color:#0369a1">13 ENGINE</span>
+  </div>
+  <div style="color:#64748b;font-size:10px;margin-bottom:20px;line-height:1.7">
+    Slot: <strong>${activeSlot} WIB</strong> (${SLOT_NAMES[activeSlot]}) &nbsp;|&nbsp;
+    Hari: <strong>${dayName}</strong> &nbsp;|&nbsp;
+    Tanggal: <strong>${dateStr}</strong> &nbsp;|&nbsp;
+    Dibuat: <strong>${timestamp} WIB</strong><br>
+    Data slot: <strong>${dataCount} draw</strong> &nbsp;|&nbsp;
+    Data global: <strong>${allDraws.length} draw</strong> &nbsp;|&nbsp;
+    Kepercayaan ensemble: <strong>${pred.overallConfidence}%</strong>
+  </div>
+
+  <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#475569;border-bottom:2px solid #e2e8f0;padding-bottom:5px;margin-bottom:10px">Prediksi Utama 4D</div>
+  <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border-radius:12px;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div>
+      <div style="font-size:52px;font-weight:900;letter-spacing:10px;font-family:monospace">${pred.numberStr}</div>
+      <div style="font-size:11px;opacity:.8;margin-top:6px">Nomor Utama 4D &nbsp;·&nbsp; Confidence: ${pred.overallConfidence}% &nbsp;·&nbsp; 13 engine independen</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;opacity:.7;margin-bottom:4px">Alternatif</div>
+      <div style="font-family:monospace;font-size:28px;font-weight:900;letter-spacing:6px">${pred.altNumberStr}</div>
+      <div style="font-size:10px;opacity:.6">Digit ke-2 per posisi</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+    ${(["As", "Kop", "Kepala", "Ekor"] as const).map((name, i) => {
+      const pr = pred.posResults[i];
+      const top3 = pr?.top3 ?? [];
+      return `<div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:9px;color:#94a3b8;font-weight:800;text-transform:uppercase;letter-spacing:1px">${name}</div>
+        <div style="font-size:32px;font-weight:900;color:#7c3aed;line-height:1.1;margin:4px 0">${pred.digits[i]}</div>
+        <div style="font-size:9px;color:#94a3b8">Alt: ${pred.altDigits[i]}</div>
+        <div style="font-size:9px;color:#94a3b8">Conf: ${pr?.confidence ?? 0}%</div>
+        <div style="font-size:9px;color:#94a3b8">Top3: ${top3.map(t => t.digit).join(" · ")}</div>
+      </div>`;
+    }).join("")}
+  </div>
+
+  <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#475569;border-bottom:2px solid #e2e8f0;padding-bottom:5px;margin:18px 0 10px">BBFS — Buat Bebas Full Set</div>
+  <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:12px;margin-bottom:8px">
+    <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#2563eb;margin-bottom:8px">BBFS 5 Digit → 5⁴ = 625 kombinasi 4D</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      ${bbfs.digits5.map(d => `<span style="width:38px;height:38px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;background:#3b82f6">${d}</span>`).join("")}
+    </div>
+    <div style="font-size:11px;font-weight:800;font-family:monospace;letter-spacing:2px;color:#2563eb">Digit: ${bbfs.digits5.join(" — ")}</div>
+  </div>
+  <div style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:12px">
+    <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#7c3aed;margin-bottom:8px">BBFS 7 Digit → 7⁴ = 2401 kombinasi 4D</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      ${bbfs.digits7.map(d => `<span style="width:38px;height:38px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;background:#7c3aed">${d}</span>`).join("")}
+    </div>
+    <div style="font-size:11px;font-weight:800;font-family:monospace;letter-spacing:2px;color:#7c3aed">Digit: ${bbfs.digits7.join(" — ")}</div>
+  </div>
+
+  <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#475569;border-bottom:2px solid #e2e8f0;padding-bottom:5px;margin:18px 0 10px">Top ${pred.topCandidates.length} Kandidat 4D</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px">
+    ${pred.topCandidates.map((c, idx) => `<div style="background:${idx === 0 ? "#7c3aed" : "#f8fafc"};color:${idx === 0 ? "#fff" : "#1e293b"};border:1px solid ${idx === 0 ? "#7c3aed" : "#e2e8f0"};border-radius:5px;padding:5px 4px;text-align:center;font-size:12px;font-weight:800;font-family:monospace">${c.num}</div>`).join("")}
+  </div>
+
+  ${backtestSection}
+
+  <div style="background:#fef9c3;border:1.5px solid #fcd34d;border-radius:8px;padding:10px 14px;font-size:10px;color:#854d0e;margin-top:18px;line-height:1.6">
+    ⚠️ <strong>Penting:</strong> Tidak ada sistem prediksi yang dapat menjamin kemenangan 100%.
+    Lottery bersifat acak. Gunakan dengan bijak dan bertanggung jawab.
+    Simpan PDF ini dan masukkan hasil aktual di fitur <em>Evaluasi & Pembelajaran</em> setelah draw keluar.
+  </div>
+
+  <div style="color:#94a3b8;font-size:9px;text-align:right;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px;line-height:1.7">
+    4D Macau Strategi Dashboard &nbsp;·&nbsp; Smart Prediction AI V2 &nbsp;·&nbsp; 13 Engine Analitik<br>
+    Slot: ${activeSlot} WIB &nbsp;·&nbsp; ${dateStr} &nbsp;·&nbsp; Dibuat: ${timestamp} WIB<br>
+    Data: ${dataCount} draw slot-spesifik + ${allDraws.length} draw global lintas slot
+  </div>
+
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank", "width=900,height=750");
+    if (win) { win.document.write(html); win.document.close(); }
+  }
+
+  // ── Evaluasi: simpan & rekam hasil aktual ───────────────────────────────────
+  function saveCurrentEval() {
+    const wibDate = new Date(Date.now() + WIB_MS);
+    const dateStr = wibDate.toISOString().slice(0, 10);
+    const entry: EvalEntry = {
+      id: `${activeSlot}_${Date.now()}`,
+      slot: activeSlot,
+      date: dateStr,
+      predictedMain: pred.numberStr,
+      predictedAlt: pred.altNumberStr,
+      bbfs5: [...bbfs.digits5],
+      bbfs7: [...bbfs.digits7],
+      top25: pred.topCandidates.map(c => c.num),
+      timestamp: Date.now(),
+    };
+    const next = [entry, ...evals].slice(0, 60);
+    setEvals(next);
+    localStorage.setItem("smartai_evals", JSON.stringify(next));
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 2500);
+    setShowEval(true);
+  }
+
+  function recordActual(id: string) {
+    const actual = (evalInput[id] ?? "").trim();
+    if (!/^\d{4}$/.test(actual)) return;
+    const next = evals.map(e => {
+      if (e.id !== id) return e;
+      const actualDigits = [...actual].map(Number);
+      const correct4D = e.predictedMain === actual || e.predictedAlt === actual;
+      const correct2D = e.predictedMain.slice(2) === actual.slice(2) || e.predictedAlt.slice(2) === actual.slice(2);
+      const inTop25 = e.top25.includes(actual);
+      const inBBFS5 = actualDigits.every(d => e.bbfs5.includes(d));
+      const inBBFS7 = actualDigits.every(d => e.bbfs7.includes(d));
+      return { ...e, actual, correct4D, correct2D, inTop25, inBBFS5, inBBFS7 };
+    });
+    setEvals(next);
+    localStorage.setItem("smartai_evals", JSON.stringify(next));
+    setEvalInput(prev => { const n = { ...prev }; delete n[id]; return n; });
+  }
+
+  function deleteEval(id: string) {
+    const next = evals.filter(e => e.id !== id);
+    setEvals(next);
+    localStorage.setItem("smartai_evals", JSON.stringify(next));
   }
 
   const gt = gameTypes;
@@ -1237,7 +1467,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
               </div>
               <h2 className="text-xl font-black">Smart Prediction AI</h2>
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("purple")}`}>V2</span>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("indigo")}`}>12 ENGINE</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("indigo")}`}>13 ENGINE</span>
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("cyan")}`}>MARKOV 2nd ORDER</span>
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("emerald")}`}>POISSON GAP</span>
             </div>
@@ -1373,17 +1603,37 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
         </table>
 
         {/* Footer */}
-        <div className={`px-5 py-3 flex items-center justify-between border-t ${tBorder} ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+        <div className={`px-5 py-3 flex items-center justify-between gap-2 flex-wrap border-t ${tBorder} ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
           <span className={`text-[11px] ${subtle}`}>
-            Prediksi utama · {dataCount} draw · {activeSlot} WIB · 12 engine aktif
+            Prediksi utama · {dataCount} draw · {activeSlot} WIB · 13 engine aktif
           </span>
-          <button
-            onClick={() => copy(buildCopyText(gt, pred.numberStr), "main")}
-            className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${isDark ? "bg-white/10 hover:bg-white/15 text-white/70" : "bg-slate-200 hover:bg-slate-300 text-slate-600"}`}
-          >
-            {copied === "main" ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied === "main" ? "Copied!" : "Copy"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={saveCurrentEval}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
+                savedMsg
+                  ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                  : isDark ? "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/25" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
+              }`}
+            >
+              {savedMsg ? <CheckCircle2 className="w-3.5 h-3.5" /> : <ClipboardCheck className="w-3.5 h-3.5" />}
+              {savedMsg ? "Tersimpan!" : "Rekam"}
+            </button>
+            <button
+              onClick={exportPDF}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${isDark ? "bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/25" : "bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200"}`}
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Simpan PDF
+            </button>
+            <button
+              onClick={() => copy(buildCopyText(gt, pred.numberStr), "main")}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${isDark ? "bg-white/10 hover:bg-white/15 text-white/70" : "bg-slate-200 hover:bg-slate-300 text-slate-600"}`}
+            >
+              {copied === "main" ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied === "main" ? "Copied!" : "Copy"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1913,6 +2163,211 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
             <span className="block mt-1 font-bold text-amber-500/80">⚠ Tidak ada sistem yang menjamin kemenangan 100% — gunakan dengan bijak.</span>
           </div>
         </div>
+      </div>
+
+      {/* ══ EVALUASI & PEMBELAJARAN ════════════════════════════════════════════ */}
+      <div className={card}>
+        {/* Header toggle */}
+        <button
+          onClick={() => setShowEval(v => !v)}
+          className="w-full px-5 py-4 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30 flex-shrink-0`}>
+              <ClipboardCheck className="w-4 h-4" />
+            </div>
+            <span className="font-black text-sm">Evaluasi &amp; Pembelajaran</span>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("emerald")}`}>
+              {evals.length} rekaman
+            </span>
+            {evalStats && (
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("cyan")}`}>
+                4D: {evalStats.rate4D}% · 2D: {evalStats.rate2D}% · Top25: {evalStats.rateTop25}%
+              </span>
+            )}
+          </div>
+          {showEval ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
+        </button>
+
+        {showEval && (
+          <div className="px-5 pb-5 space-y-4">
+
+            {/* Info */}
+            <div className={`p-3 rounded-xl text-[11px] leading-relaxed ${isDark ? "bg-emerald-500/8 border border-emerald-500/20 text-emerald-200/80" : "bg-emerald-50 border border-emerald-200 text-emerald-800"}`}>
+              <span className="font-bold">Cara pakai:</span> Klik <strong>Rekam</strong> di footer tabel prediksi untuk menyimpan prediksi saat ini.
+              Setelah draw keluar, masukkan 4 digit hasil aktual di kolom evaluasi.
+              Sistem otomatis menghitung apakah prediksi tepat — datanya tersimpan per akun &amp; disinkronkan lintas perangkat.
+            </div>
+
+            {/* Stats ringkasan */}
+            {evalStats && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {[
+                  { label: "Hit 4D Tepat", value: `${evalStats.rate4D}%`, sub: "4D utama/alt", color: evalStats.rate4D },
+                  { label: "Hit 2D Tepat", value: `${evalStats.rate2D}%`, sub: "Kepala+Ekor", color: evalStats.rate2D },
+                  { label: "Dalam Top25", value: `${evalStats.rateTop25}%`, sub: "kandidat", color: evalStats.rateTop25 },
+                  { label: "Dalam BBFS5", value: `${evalStats.rateBBFS5}%`, sub: "semua digit", color: evalStats.rateBBFS5 },
+                  { label: "Dalam BBFS7", value: `${evalStats.rateBBFS7}%`, sub: "semua digit", color: evalStats.rateBBFS7 },
+                ].map((item, i) => (
+                  <div key={i} className={`rounded-2xl p-3 text-center ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+                    <div className={`text-xl font-black ${confColor(item.color)}`}>{item.value}</div>
+                    <div className={`text-[10px] font-bold mt-0.5 ${isDark ? "text-white/60" : "text-slate-600"}`}>{item.label}</div>
+                    <div className={`text-[9px] mt-0.5 ${subtle}`}>{item.sub}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!evalStats && evals.length > 0 && (
+              <div className={`text-xs text-center py-2 ${subtle}`}>
+                Masukkan hasil aktual di bawah untuk melihat statistik akurasi
+              </div>
+            )}
+            {evals.length === 0 && (
+              <div className={`text-center py-8 ${subtle}`}>
+                <ClipboardCheck className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                <div className="text-sm font-bold opacity-40">Belum ada rekaman prediksi</div>
+                <div className={`text-xs mt-1 opacity-30`}>Klik tombol <strong>Rekam</strong> di footer tabel prediksi untuk memulai</div>
+              </div>
+            )}
+
+            {/* Daftar evaluasi */}
+            {evals.length > 0 && (
+              <div className="space-y-2">
+                <div className={`text-xs font-black ${isDark ? "text-white/50" : "text-slate-500"}`}>
+                  Riwayat Prediksi ({evals.length} rekaman terbaru):
+                </div>
+                {evals.map(e => {
+                  const ts = new Date(e.timestamp);
+                  const tsStr = ts.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+                  const hasActual = !!e.actual;
+                  return (
+                    <div
+                      key={e.id}
+                      className={`rounded-2xl border p-4 ${isDark
+                        ? hasActual
+                          ? e.correct4D ? "border-green-500/30 bg-green-500/5" : "border-white/8 bg-white/3"
+                          : "border-white/10 bg-white/3"
+                        : hasActual
+                          ? e.correct4D ? "border-green-300 bg-green-50" : "border-slate-200 bg-white"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        {/* Left: prediksi info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg ${isDark ? "bg-violet-500/20 text-violet-300" : "bg-violet-100 text-violet-700"}`}>
+                              {e.slot} WIB
+                            </span>
+                            <span className={`text-[10px] ${subtle}`}>{tsStr}</span>
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <div>
+                              <div className={`text-[9px] font-bold mb-0.5 ${subtle}`}>Prediksi Utama</div>
+                              <div className={`font-black text-xl tabular-nums tracking-widest font-mono ${isDark ? "text-white" : "text-slate-800"}`}>
+                                {e.predictedMain}
+                              </div>
+                            </div>
+                            <div>
+                              <div className={`text-[9px] font-bold mb-0.5 ${subtle}`}>Alternatif</div>
+                              <div className={`font-black text-base tabular-nums tracking-widest font-mono ${isDark ? "text-white/60" : "text-slate-500"}`}>
+                                {e.predictedAlt}
+                              </div>
+                            </div>
+                            <div>
+                              <div className={`text-[9px] font-bold mb-0.5 ${subtle}`}>BBFS 5</div>
+                              <div className={`text-sm font-black font-mono tracking-widest ${isDark ? "text-sky-300" : "text-sky-700"}`}>
+                                {e.bbfs5.join("")}
+                              </div>
+                            </div>
+                            <div>
+                              <div className={`text-[9px] font-bold mb-0.5 ${subtle}`}>BBFS 7</div>
+                              <div className={`text-sm font-black font-mono tracking-widest ${isDark ? "text-violet-300" : "text-violet-700"}`}>
+                                {e.bbfs7.join("")}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: hasil aktual / input */}
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                          {hasActual ? (
+                            <div className="text-right">
+                              <div className={`text-[9px] font-bold mb-0.5 ${subtle}`}>Hasil Aktual</div>
+                              <div className={`font-black text-2xl tabular-nums tracking-widest font-mono ${
+                                e.correct4D
+                                  ? isDark ? "text-green-400" : "text-green-600"
+                                  : isDark ? "text-white" : "text-slate-800"
+                              }`}>{e.actual}</div>
+                              <div className="flex items-center gap-1 mt-1 flex-wrap justify-end">
+                                {e.correct4D && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-green-500/20 text-green-400" : "bg-green-100 text-green-700"}`}>✓ 4D</span>
+                                )}
+                                {e.correct2D && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-700"}`}>✓ 2D</span>
+                                )}
+                                {e.inTop25 && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-700"}`}>Top25</span>
+                                )}
+                                {e.inBBFS5 && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-sky-500/20 text-sky-400" : "bg-sky-100 text-sky-700"}`}>BBFS5</span>
+                                )}
+                                {e.inBBFS7 && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-violet-500/20 text-violet-400" : "bg-violet-100 text-violet-700"}`}>BBFS7</span>
+                                )}
+                                {!e.correct4D && !e.correct2D && !e.inTop25 && !e.inBBFS5 && !e.inBBFS7 && (
+                                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDark ? "bg-red-500/15 text-red-400" : "bg-red-50 text-red-600"}`}>Tidak masuk</span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                maxLength={4}
+                                placeholder="4 digit"
+                                value={evalInput[e.id] ?? ""}
+                                onChange={ev => setEvalInput(prev => ({ ...prev, [e.id]: ev.target.value.replace(/\D/g, "") }))}
+                                onKeyDown={ev => { if (ev.key === "Enter") recordActual(e.id); }}
+                                className={`w-20 text-center text-sm font-black tabular-nums font-mono tracking-widest rounded-xl border px-2 py-1.5 outline-none ${isDark
+                                  ? "bg-white/8 border-white/15 text-white placeholder-white/20 focus:border-emerald-500/60"
+                                  : "bg-white border-slate-200 text-slate-800 placeholder-slate-300 focus:border-emerald-400"
+                                }`}
+                              />
+                              <button
+                                onClick={() => recordActual(e.id)}
+                                disabled={!/^\d{4}$/.test(evalInput[e.id] ?? "")}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all disabled:opacity-30 ${isDark
+                                  ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30"
+                                  : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                }`}
+                              >
+                                Simpan
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => deleteEval(e.id)}
+                            className={`text-[10px] flex items-center gap-1 opacity-30 hover:opacity-70 transition-opacity ${isDark ? "text-red-400" : "text-red-500"}`}
+                          >
+                            <Trash2 className="w-3 h-3" /> Hapus
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className={`p-3 rounded-xl text-[10px] leading-relaxed ${isDark ? "bg-white/3 text-white/40" : "bg-slate-50 text-slate-500"}`}>
+              <span className="font-bold">📊 Tentang evaluasi:</span> Data rekaman disimpan di akun Anda dan disinkronkan lintas perangkat.
+              Statistik akurasi terbentuk otomatis setelah Anda memasukkan hasil aktual.
+              Sistem backtest yang ada di atas sudah menganalisis 907+ draw historis secara otomatis untuk mengoptimalkan bobot engine — evaluasi ini melengkapinya dengan data draw terbaru yang belum masuk ke historis.
+              <span className="block mt-1 font-bold text-amber-500/80">Semakin banyak rekaman dengan hasil aktual, semakin akurat gambaran performa sistem.</span>
+            </div>
+          </div>
+        )}
       </div>
 
     </div>
