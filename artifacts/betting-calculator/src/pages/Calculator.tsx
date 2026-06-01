@@ -9,6 +9,7 @@ import Prediksi3 from "./Prediksi3";
 import AnalisisNomor from "./AnalisisNomor";
 import Analisis2 from "./Analisis2";
 import SmartPrediction from "./SmartPrediction";
+import SmartPredictionV2 from "./SmartPredictionV2";
 import Kalender from "./Kalender";
 import RumusPage from "./RumusPage";
 import Logo from "@/components/Logo";
@@ -22,7 +23,7 @@ import {
   Settings, Save, Loader2, Wifi, WifiOff, Timer, Edit3, Shield, Flame,
   Snowflake, PenLine, PlusCircle, Zap, Star, Upload, BellRing, CalendarDays,
   Undo2, Banknote, Hash, CheckCircle2, XCircle, LogOut, Brain, ChevronDown, Trophy,
-  ListOrdered, Tv, Radio, BookOpen, Menu, ChevronRight, Layers, Sparkles, Calculator as CalculatorIcon
+  ListOrdered, Tv, Radio, BookOpen, Menu, ChevronRight, Layers, Sparkles, Cpu, Calculator as CalculatorIcon
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -1401,7 +1402,7 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
             { id:"laporan",    icon:<FileText className="w-3.5 h-3.5"/> , label:"Laporan",    grad:"from-orange-400 to-orange-600",  shadow:"shadow-orange-500/40" },
             { id:"result",     icon:<Award className="w-3.5 h-3.5"/>    , label:"Result",     grad:"from-yellow-400 to-amber-500",   shadow:"shadow-yellow-500/40" },
             { id:"prediksi",   icon:<Brain className="w-3.5 h-3.5"/>    , label:"Prediksi",   grad:"from-blue-500 to-blue-700",      shadow:"shadow-blue-500/40" },
-            { id:"prediksi2",  icon:<Zap className="w-3.5 h-3.5"/>      , label:"Prediksi 2", grad:"from-purple-500 to-indigo-600",  shadow:"shadow-purple-500/40" },
+            { id:"prediksi2",  icon:<Cpu className="w-3.5 h-3.5"/>      , label:"Smart AI V2", grad:"from-purple-500 to-indigo-600",  shadow:"shadow-purple-500/40" },
             { id:"prediksi3",  icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Prediksi 3", grad:"from-pink-500 to-rose-600",      shadow:"shadow-pink-500/40" },
             { id:"berantai",   icon:<Hash className="w-3.5 h-3.5"/>     , label:"Berantai",   grad:"from-cyan-400 to-teal-600",      shadow:"shadow-cyan-500/40" },
             { id:"analisis",   icon:<Flame className="w-3.5 h-3.5"/>    , label:"Analisis",   grad:"from-red-500 to-rose-600",       shadow:"shadow-red-500/40" },
@@ -1433,6 +1434,7 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
               <span className="flex-1 text-[13px]">{item.label}</span>
               {item.id === "live" && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
               {item.id === "cerdas" && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? "bg-violet-500/25 text-violet-300" : "bg-violet-100 text-violet-600"}`}>AI</span>}
+              {item.id === "prediksi2" && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? "bg-indigo-500/30 text-indigo-300" : "bg-indigo-100 text-indigo-600"}`}>V2</span>}
               {menu === item.id && <ChevronRight className="w-3 h-3 opacity-40 flex-shrink-0" />}
             </button>
           ))}
@@ -1479,7 +1481,7 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
               const PAGE_META: Record<string,{label:string;color:string}> = {
                 cerdas:{label:"Smart AI",color:"#8b5cf6"}, kalkulator:{label:"Kalkulator",color:"#10b981"},
                 laporan:{label:"Laporan",color:"#f97316"}, result:{label:"Result",color:"#f59e0b"},
-                prediksi:{label:"Prediksi",color:"#3b82f6"}, prediksi2:{label:"Prediksi 2",color:"#7c3aed"},
+                prediksi:{label:"Prediksi",color:"#3b82f6"}, prediksi2:{label:"Smart AI V2",color:"#7c3aed"},
                 prediksi3:{label:"Prediksi 3",color:"#ec4899"}, berantai:{label:"Berantai",color:"#06b6d4"},
                 analisis:{label:"Analisis",color:"#ef4444"}, analisis2:{label:"Analisis 2",color:"#6366f1"},
                 rumus:{label:"Rumus",color:"#14b8a6"}, kalender:{label:"Kalender",color:"#84cc16"},
@@ -2362,9 +2364,9 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
           <Prediksi resultData={resultData} isDark={isDark} />
         )}
 
-        {/* ══ PREDIKSI 2 ══ */}
+        {/* ══ SMART AI V2 ══ */}
         {menu === "prediksi2" && (
-          <Prediksi2 resultData={resultData} isDark={isDark} />
+          <SmartPredictionV2 resultData={resultData} isDark={isDark} />
         )}
 
         {/* ══ PREDIKSI 3 ══ */}

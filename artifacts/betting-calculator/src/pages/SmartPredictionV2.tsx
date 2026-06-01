@@ -26,11 +26,10 @@ import {
   Brain, Clock, Zap, TrendingUp, Hash, Layers,
   ArrowRight, RefreshCw, CheckCircle, Copy, ChevronDown, ChevronUp,
   Star, Activity, Flame, Shield, Target, BarChart2,
-  Cpu, Award, GitBranch, Waves, Repeat, Scale, Sun
+  Cpu, GitBranch, Waves, Repeat, Scale, Sun, Database, Sparkles
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, RadarChart,
-  PolarGrid, PolarAngleAxis, Radar
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -121,8 +120,20 @@ function getLastResult(resultData: ResultRow[], slot: string): string | null {
   return null;
 }
 
+// Ambil SEMUA draw dari SEMUA slot — memberikan 900+ data point untuk analisis global
+function getAllDraws(resultData: ResultRow[]): string[] {
+  const out: string[] = [];
+  for (const row of resultData) {
+    for (const slot of TIME_SLOTS) {
+      const r = getResult(row, slot);
+      if (r) out.push(r);
+    }
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// 12 ENGINES — each returns scores[10] for digits 0-9 at a given position
+// 13 ENGINES — each returns scores[10] for digits 0-9 at a given position
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // E01: Multi-window Recency (3 temporal windows + adaptive blend)
@@ -485,23 +496,144 @@ function e12_repeatPattern(draws: string[], pos: number): number[] {
   return normalise(s);
 }
 
+// E13: All-Slot Global Frequency (menggunakan SEMUA 900+ draw dari semua slot)
+// Engine ini memberikan sinyal dasar statistik yang paling kuat karena pakai data terbanyak
+function e13_allSlotFreq(allDraws: string[], pos: number): number[] {
+  if (allDraws.length === 0) return new Array(10).fill(0.1);
+
+  const freq = new Array(10).fill(0);
+  const lastSeen = new Array(10).fill(-1);
+  const window = Math.min(500, allDraws.length);
+
+  for (let i = 0; i < window; i++) {
+    const dig = +allDraws[i][pos];
+    freq[dig] += Math.exp(-i * 0.004); // sangat lambat decay — manfaatkan semua data
+    if (lastSeen[dig] === -1) lastSeen[dig] = i;
+  }
+
+  // Gabungkan frekuensi berbobot + sinyal gap
+  const s = freq.map((f, d) => {
+    const gap = lastSeen[d] === -1 ? window : lastSeen[d];
+    const expectedInterval = window / Math.max(
+      allDraws.slice(0, window).filter(dr => +dr[pos] === d).length, 1,
+    );
+    const gapSignal = 1 - Math.exp(-gap / Math.max(expectedInterval, 1));
+    return f * 0.65 + gapSignal * 0.35;
+  });
+
+  return normalise(s);
+}
+
+// ── BBFS Computation ──────────────────────────────────────────────────────────
+// BBFS (Buat Bebas Full Set): pilih N digit terbaik → taruhan SEMUA kombinasi 4D dari N digit tsb
+// BBFS 5 digit  → 5^4  = 625  nomor  (repetisi boleh, misal 1111, 1112, ...)
+// BBFS 7 digit  → 7^4  = 2401 nomor
+interface BBFSResult {
+  digits5: number[];          // 5 digit terpilih (sorted ASC)
+  digits7: number[];          // 7 digit terpilih (sorted ASC)
+  count5: number;             // 625
+  count7: number;             // 2401
+  globalDigitScores: number[];// skor 0-100 per digit
+  rankList: Array<{ digit: number; score: number }>; // semua 10 digit urut skor
+}
+
+function computeBBFS(pred: Pred4D, allDraws: string[]): BBFSResult {
+  // Langkah 1: Agregat skor prediksi slot-spesifik dari semua 4 posisi
+  const predScore = new Array(10).fill(0);
+  pred.posResults.forEach(pr => {
+    pr.scores.forEach((score, digit) => { predScore[digit] += score / 4; });
+  });
+
+  // Langkah 2: Frekuensi global dari semua draw (semua posisi, bobot recency)
+  const globalFreq = new Array(10).fill(0);
+  if (allDraws.length > 0) {
+    const win = Math.min(300, allDraws.length);
+    for (let i = 0; i < win; i++) {
+      const w = Math.exp(-i * 0.006);
+      for (const c of allDraws[i]) globalFreq[+c] += w;
+    }
+    const maxF = Math.max(...globalFreq, 1e-9);
+    globalFreq.forEach((_, i) => { globalFreq[i] = (globalFreq[i] / maxF) * 100; });
+  }
+
+  // Langkah 3: Sinyal gap global — digit yang lama tidak muncul di SEMUA slot
+  const globalGap = new Array(10).fill(0);
+  if (allDraws.length > 0) {
+    for (let d = 0; d <= 9; d++) {
+      let lastSeen = -1;
+      let count = 0;
+      for (let i = 0; i < allDraws.length; i++) {
+        if ([...allDraws[i]].some(c => +c === d)) {
+          if (lastSeen === -1) lastSeen = i;
+          count++;
+        }
+      }
+      // Expected interval antar kemunculan (di semua posisi 4 draw)
+      const avgInterval = allDraws.length / Math.max(count * 4 / allDraws.length * allDraws.length, 1);
+      const gap = lastSeen === -1 ? allDraws.length : lastSeen;
+      globalGap[d] = (1 - Math.exp(-gap / Math.max(avgInterval, 1))) * 100;
+    }
+  }
+
+  // Langkah 4: Markov sinyal global — digit yang sering mengikuti digit terakhir di semua slot
+  const markovGlobal = new Array(10).fill(0);
+  if (allDraws.length >= 3) {
+    // Untuk setiap posisi, hitung transition matrix global
+    for (let pos = 0; pos < 4; pos++) {
+      const trans: number[][] = Array.from({ length: 10 }, () => new Array(10).fill(0));
+      const win = Math.min(200, allDraws.length - 1);
+      for (let i = 0; i < win; i++) {
+        trans[+allDraws[i + 1][pos]][+allDraws[i][pos]]++;
+      }
+      const prev = +allDraws[0][pos];
+      const row = trans[prev];
+      const total = row.reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        row.forEach((v, d) => { markovGlobal[d] += (v / total) * 25; });
+      }
+    }
+  }
+
+  // Langkah 5: Gabungkan semua sinyal
+  // 45% prediksi slot-spesifik + 25% frekuensi global + 15% gap global + 15% markov global
+  const globalDigitScores = predScore.map((ps, d) =>
+    0.45 * ps + 0.25 * globalFreq[d] + 0.15 * globalGap[d] + 0.15 * markovGlobal[d]
+  );
+
+  const rankList = globalDigitScores
+    .map((score, digit) => ({ digit, score }))
+    .sort((a, b) => b.score - a.score);
+
+  const digits5 = rankList.slice(0, 5).map(r => r.digit).sort((a, b) => a - b);
+  const digits7 = rankList.slice(0, 7).map(r => r.digit).sort((a, b) => a - b);
+
+  return {
+    digits5, digits7,
+    count5: 5 ** 4,   // 625
+    count7: 7 ** 4,   // 2401
+    globalDigitScores,
+    rankList,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENGINE WEIGHTS (default — can be adapted via backtest)
 // ═══════════════════════════════════════════════════════════════════════════════
 const DEFAULT_WEIGHTS = [
-  20, // E01 Multi-window Recency
-  18, // E02 Poisson Gap
-  15, // E03 2nd-order Markov
+  19, // E01 Multi-window Recency
+  17, // E02 Poisson Gap
+  14, // E03 2nd-order Markov
   10, // E04 Slot Transition+
-   9, // E05 Day×Slot
-   8, // E06 Momentum+Accel
+   8, // E05 Day×Slot
+   7, // E06 Momentum+Accel
    6, // E07 Cross-position Corr
    5, // E08 Cyclic Detection
    4, // E09 Hot/Cold Streak
    3, // E10 Balance
    2, // E11 Sum Pattern
    1, // E12 Repeat Pattern
-];
+   8, // E13 All-Slot Global Freq  (900+ draw data)
+]; // combineScores normalises by totalW automatically
 
 // ── Score combiner ────────────────────────────────────────────────────────────
 function combineScores(allScores: number[][], weights: number[]): number[] {
@@ -558,6 +690,7 @@ function predictPosition(
   slot: string,
   pos: number,
   dayName: string,
+  allDraws: string[],
 ): PosResult {
   const draws = getDrawsForSlot(resultData, slot);
 
@@ -586,6 +719,7 @@ function predictPosition(
     e10_balance(draws, pos),
     e11_sumPattern(draws, pos),
     e12_repeatPattern(draws, pos),
+    e13_allSlotFreq(allDraws, pos),   // E13: semua 900+ draw dari semua slot
   ];
 
   const scores = combineScores(engineScores, DEFAULT_WEIGHTS);
@@ -632,9 +766,9 @@ interface Pred4D {
   topCandidates: Array<{ num: string; prob: number }>;
 }
 
-function buildPred4D(resultData: ResultRow[], slot: string, dayName: string): Pred4D {
+function buildPred4D(resultData: ResultRow[], slot: string, dayName: string, allDraws: string[]): Pred4D {
   const posResults: PosResult[] = [0, 1, 2, 3].map(p =>
-    predictPosition(resultData, slot, p, dayName),
+    predictPosition(resultData, slot, p, dayName, allDraws),
   );
 
   const digits = posResults.map(r => r.topDigit) as [number, number, number, number];
@@ -753,20 +887,21 @@ interface BacktestResult {
 function backtestV2(resultData: ResultRow[], slot: string): BacktestResult {
   const draws = getDrawsForSlot(resultData, slot);
   if (draws.length < 30) {
-    return { rate4D: 0, rate2D: 0, correct4D: 0, correct2D: 0, total: 0, perEngineHit: new Array(12).fill(0) };
+    return { rate4D: 0, rate2D: 0, correct4D: 0, correct2D: 0, total: 0, perEngineHit: new Array(13).fill(0) };
   }
 
   const testN = Math.min(25, draws.length - 20);
   let correct4D = 0;
   let correct2D = 0;
-  const engineHits = new Array(12).fill(0);
+  const engineHits = new Array(13).fill(0);
   const dayName = getWibDayName();
 
   for (let i = 0; i < testN; i++) {
     const actual = draws[i];
     const histData = resultData.slice(i + 1);
     try {
-      const p = buildPred4D(histData, slot, dayName);
+      const histAllDraws = getAllDraws(histData);
+      const p = buildPred4D(histData, slot, dayName, histAllDraws);
       if (p.topCandidates.some(c => c.num === actual)) correct4D++;
       const actual2D = actual.slice(2);
       if (p.topCandidates.some(c => c.num.slice(2) === actual2D)) correct2D++;
@@ -788,6 +923,7 @@ function backtestV2(resultData: ResultRow[], slot: string): BacktestResult {
           e10_balance(histDraws, pos),
           e11_sumPattern(histDraws, pos),
           e12_repeatPattern(histDraws, pos),
+          e13_allSlotFreq(histAllDraws, pos),
         ];
         const actualDig = +actual[pos];
         engines.forEach((scores, ei) => {
@@ -814,18 +950,19 @@ function backtestV2(resultData: ResultRow[], slot: string): BacktestResult {
 interface Props { resultData: ResultRow[]; isDark: boolean; }
 
 const ENGINE_META = [
-  { id: "E01", name: "Multi-window Recency",   w: 20, color: "#8b5cf6", icon: <Zap    className="w-3 h-3" /> },
-  { id: "E02", name: "Poisson Gap Model",      w: 18, color: "#f59e0b", icon: <Waves  className="w-3 h-3" /> },
-  { id: "E03", name: "Markov Orde-2",          w: 15, color: "#3b82f6", icon: <GitBranch className="w-3 h-3" /> },
+  { id: "E01", name: "Multi-window Recency",   w: 19, color: "#8b5cf6", icon: <Zap       className="w-3 h-3" /> },
+  { id: "E02", name: "Poisson Gap Model",      w: 17, color: "#f59e0b", icon: <Waves     className="w-3 h-3" /> },
+  { id: "E03", name: "Markov Orde-2",          w: 14, color: "#3b82f6", icon: <GitBranch className="w-3 h-3" /> },
   { id: "E04", name: "Transisi Slot+",         w: 10, color: "#06b6d4", icon: <ArrowRight className="w-3 h-3" /> },
-  { id: "E05", name: "Pola Hari×Slot",         w:  9, color: "#10b981", icon: <Sun    className="w-3 h-3" /> },
-  { id: "E06", name: "Momentum+Akselerasi",    w:  8, color: "#ef4444", icon: <TrendingUp className="w-3 h-3" /> },
-  { id: "E07", name: "Korelasi Antar Posisi",  w:  6, color: "#ec4899", icon: <Layers className="w-3 h-3" /> },
-  { id: "E08", name: "Deteksi Siklus",         w:  5, color: "#a855f7", icon: <Repeat className="w-3 h-3" /> },
-  { id: "E09", name: "Hot/Cold Streak",        w:  4, color: "#f97316", icon: <Flame  className="w-3 h-3" /> },
-  { id: "E10", name: "Balance Equilibrium",    w:  3, color: "#84cc16", icon: <Scale  className="w-3 h-3" /> },
-  { id: "E11", name: "Pola Sum Digit",         w:  2, color: "#64748b", icon: <Hash   className="w-3 h-3" /> },
+  { id: "E05", name: "Pola Hari×Slot",         w:  8, color: "#10b981", icon: <Sun       className="w-3 h-3" /> },
+  { id: "E06", name: "Momentum+Akselerasi",    w:  7, color: "#ef4444", icon: <TrendingUp className="w-3 h-3" /> },
+  { id: "E07", name: "Korelasi Antar Posisi",  w:  6, color: "#ec4899", icon: <Layers    className="w-3 h-3" /> },
+  { id: "E08", name: "Deteksi Siklus",         w:  5, color: "#a855f7", icon: <Repeat    className="w-3 h-3" /> },
+  { id: "E09", name: "Hot/Cold Streak",        w:  4, color: "#f97316", icon: <Flame     className="w-3 h-3" /> },
+  { id: "E10", name: "Balance Equilibrium",    w:  3, color: "#84cc16", icon: <Scale     className="w-3 h-3" /> },
+  { id: "E11", name: "Pola Sum Digit",         w:  2, color: "#64748b", icon: <Hash      className="w-3 h-3" /> },
   { id: "E12", name: "Repeat Pattern",         w:  1, color: "#94a3b8", icon: <RefreshCw className="w-3 h-3" /> },
+  { id: "E13", name: "Global Freq (All Slot)", w:  8, color: "#0ea5e9", icon: <Database  className="w-3 h-3" /> },
 ];
 
 export default function SmartPredictionV2({ resultData, isDark }: Props) {
@@ -889,10 +1026,15 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
   const dayName = getWibDayName();
 
   // ── Heavy computation ──────────────────────────────────────────────────────
+  // Ambil SEMUA draw dari SEMUA slot (900+ data point) — otomatis update saat data baru masuk
+  const allDraws = useMemo(() => getAllDraws(resultData), [resultData]);
+
   const pred = useMemo(
-    () => buildPred4D(resultData, activeSlot, dayName),
-    [resultData, activeSlot, dayName],
+    () => buildPred4D(resultData, activeSlot, dayName, allDraws),
+    [resultData, activeSlot, dayName, allDraws],
   );
+
+  const bbfs = useMemo(() => computeBBFS(pred, allDraws), [pred, allDraws]);
 
   const gameTypes = useMemo(() => calcGameTypes(pred.digits), [pred.digits]);
   const altGameTypes = useMemo(() => calcGameTypes(pred.altDigits), [pred.altDigits]);
@@ -1603,6 +1745,174 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
             Data historis slot {activeSlot} belum cukup untuk backtest (minimal 30 draw).
           </div>
         )}
+      </div>
+
+      {/* ══ BBFS CARD ══════════════════════════════════════════════════════════ */}
+      <div className={card}>
+        {/* Header */}
+        <div className={`px-5 pt-5 pb-4 border-b ${tBorder}`}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-500/30 flex-shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <div className={`text-sm font-black ${isDark ? "text-white" : "text-slate-900"}`}>
+                BBFS — Buat Bebas Full Set
+              </div>
+              <div className={`text-[11px] mt-0.5 ${subtle}`}>
+                Pilih N digit terbaik → taruhan SEMUA kombinasi 4D dari digit tersebut
+              </div>
+            </div>
+            <div className={`ml-auto text-[10px] px-2 py-1 rounded-lg font-bold flex items-center gap-1 ${isDark ? "bg-sky-500/20 text-sky-300" : "bg-sky-50 text-sky-600"}`}>
+              <Database className="w-3 h-3" />
+              {allDraws.length} draw
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* BBFS 5 Digit */}
+          <div className={`rounded-2xl p-4 border ${isDark ? "border-sky-500/25 bg-sky-500/8" : "border-sky-200 bg-sky-50"}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className={`text-xs font-black uppercase tracking-widest ${isDark ? "text-sky-300" : "text-sky-700"}`}>
+                  BBFS 5 Digit
+                </div>
+                <div className={`text-[10px] mt-0.5 ${subtle}`}>
+                  5⁴ = 625 kombinasi 4D
+                </div>
+              </div>
+              <div className={`text-[10px] font-bold px-2.5 py-1 rounded-lg ${isDark ? "bg-sky-500/20 text-sky-300" : "bg-sky-100 text-sky-700"}`}>
+                625 nomor
+              </div>
+            </div>
+            {/* Digit pills */}
+            <div className="flex gap-2 flex-wrap mb-3">
+              {bbfs.digits5.map(d => (
+                <div
+                  key={d}
+                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black shadow-md ${isDark ? "bg-sky-500 text-white shadow-sky-500/40" : "bg-sky-500 text-white shadow-sky-200"}`}
+                >
+                  {d}
+                </div>
+              ))}
+            </div>
+            {/* Score bars */}
+            <div className="space-y-1">
+              {bbfs.digits5.map(d => {
+                const sc = bbfs.globalDigitScores[d];
+                const maxSc = Math.max(...bbfs.globalDigitScores, 1);
+                const pct = Math.round((sc / maxSc) * 100);
+                return (
+                  <div key={d} className="flex items-center gap-2">
+                    <span className={`text-[10px] font-black w-4 text-right flex-shrink-0 ${isDark ? "text-sky-300" : "text-sky-700"}`}>{d}</span>
+                    <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/8" : "bg-sky-100"}`}>
+                      <div className="h-full rounded-full bg-sky-500" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className={`text-[9px] font-black flex-shrink-0 w-7 ${subtle}`}>{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className={`mt-3 text-[11px] font-mono tracking-widest font-black ${isDark ? "text-white/70" : "text-slate-700"}`}>
+              Digit: {bbfs.digits5.join(" — ")}
+            </div>
+          </div>
+
+          {/* BBFS 7 Digit */}
+          <div className={`rounded-2xl p-4 border ${isDark ? "border-violet-500/25 bg-violet-500/8" : "border-violet-200 bg-violet-50"}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className={`text-xs font-black uppercase tracking-widest ${isDark ? "text-violet-300" : "text-violet-700"}`}>
+                  BBFS 7 Digit
+                </div>
+                <div className={`text-[10px] mt-0.5 ${subtle}`}>
+                  7⁴ = 2401 kombinasi 4D
+                </div>
+              </div>
+              <div className={`text-[10px] font-bold px-2.5 py-1 rounded-lg ${isDark ? "bg-violet-500/20 text-violet-300" : "bg-violet-100 text-violet-700"}`}>
+                2401 nomor
+              </div>
+            </div>
+            {/* Digit pills */}
+            <div className="flex gap-2 flex-wrap mb-3">
+              {bbfs.digits7.map(d => (
+                <div
+                  key={d}
+                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black shadow-md ${isDark ? "bg-violet-500 text-white shadow-violet-500/40" : "bg-violet-500 text-white shadow-violet-200"}`}
+                >
+                  {d}
+                </div>
+              ))}
+            </div>
+            {/* Score bars */}
+            <div className="space-y-1">
+              {bbfs.digits7.map(d => {
+                const sc = bbfs.globalDigitScores[d];
+                const maxSc = Math.max(...bbfs.globalDigitScores, 1);
+                const pct = Math.round((sc / maxSc) * 100);
+                return (
+                  <div key={d} className="flex items-center gap-2">
+                    <span className={`text-[10px] font-black w-4 text-right flex-shrink-0 ${isDark ? "text-violet-300" : "text-violet-700"}`}>{d}</span>
+                    <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/8" : "bg-violet-100"}`}>
+                      <div className="h-full rounded-full bg-violet-500" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className={`text-[9px] font-black flex-shrink-0 w-7 ${subtle}`}>{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className={`mt-3 text-[11px] font-mono tracking-widest font-black ${isDark ? "text-white/70" : "text-slate-700"}`}>
+              Digit: {bbfs.digits7.join(" — ")}
+            </div>
+          </div>
+
+          {/* Ranking semua digit 0-9 */}
+          <div>
+            <div className={`text-[11px] font-black mb-2 ${isDark ? "text-white/50" : "text-slate-500"}`}>
+              Peringkat Semua Digit (skor gabungan 13 engine + {allDraws.length} draw global):
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {bbfs.rankList.map((item, rank) => {
+                const maxSc = Math.max(...bbfs.globalDigitScores, 1);
+                const pct = Math.round((item.score / maxSc) * 100);
+                const inBbfs5 = bbfs.digits5.includes(item.digit);
+                const inBbfs7 = bbfs.digits7.includes(item.digit);
+                return (
+                  <div
+                    key={item.digit}
+                    className={`rounded-xl p-2 text-center ${
+                      inBbfs5
+                        ? isDark ? "bg-sky-500/20 border border-sky-500/40" : "bg-sky-100 border border-sky-300"
+                        : inBbfs7
+                        ? isDark ? "bg-violet-500/15 border border-violet-500/30" : "bg-violet-50 border border-violet-200"
+                        : isDark ? "bg-white/3 border border-white/6" : "bg-slate-50 border border-slate-200"
+                    }`}
+                  >
+                    <div className={`text-[9px] font-bold ${subtle}`}>#{rank + 1}</div>
+                    <div className={`text-lg font-black ${
+                      inBbfs5
+                        ? isDark ? "text-sky-300" : "text-sky-700"
+                        : inBbfs7
+                        ? isDark ? "text-violet-300" : "text-violet-700"
+                        : isDark ? "text-white/50" : "text-slate-400"
+                    }`}>{item.digit}</div>
+                    <div className={`text-[9px] font-bold ${subtle}`}>{pct}%</div>
+                    {inBbfs5 && <div className={`text-[7px] font-black mt-0.5 ${isDark ? "text-sky-400" : "text-sky-600"}`}>B5</div>}
+                    {!inBbfs5 && inBbfs7 && <div className={`text-[7px] font-black mt-0.5 ${isDark ? "text-violet-400" : "text-violet-600"}`}>B7</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className={`p-3 rounded-xl text-[10px] leading-relaxed ${isDark ? "bg-white/3 text-white/40" : "bg-slate-50 text-slate-500"}`}>
+            <span className="font-bold">Cara pakai BBFS:</span> Pilih semua nomor 4D yang terbentuk dari kombinasi digit BBFS yang dipilih.
+            BBFS 5 menghasilkan 5×5×5×5 = 625 nomor, BBFS 7 menghasilkan 7×7×7×7 = 2401 nomor.
+            Digit dipilih berdasarkan analisis gabungan: skor 13 engine slot-spesifik + frekuensi global {allDraws.length} draw + sinyal gap + Markov global.
+            <span className="block mt-1 font-bold text-amber-500/80">⚠ Tidak ada sistem yang menjamin kemenangan 100% — gunakan dengan bijak.</span>
+          </div>
+        </div>
       </div>
 
     </div>
