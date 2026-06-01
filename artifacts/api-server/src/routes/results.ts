@@ -41,6 +41,18 @@ function rowsToResultFormat(rows: { dateKey: string; slot: string; number: strin
     });
 }
 
+async function readFromDb() {
+  return db
+    .select({
+      dateKey: lotteryResultsTable.dateKey,
+      slot: lotteryResultsTable.slot,
+      number: lotteryResultsTable.number,
+    })
+    .from(lotteryResultsTable)
+    .where(gte(lotteryResultsTable.dateKey, RESULT_START_DATE))
+    .orderBy(desc(lotteryResultsTable.dateKey), desc(lotteryResultsTable.slot));
+}
+
 router.get("/results/toto-macau", async (req, res) => {
   const now = Date.now();
   const cacheAge = _resultCache ? now - _resultCache.at : Infinity;
@@ -58,20 +70,16 @@ router.get("/results/toto-macau", async (req, res) => {
 
   try {
     if (!_fetchInFlight) {
-      _fetchInFlight = fetchAndStoreFromMasterlive().then(() => {}).finally(() => { _fetchInFlight = null; });
+      _fetchInFlight = fetchAndStoreFromMasterlive()
+        .then(() => {})
+        .catch(err => {
+          req.log.warn({ err }, "results: background fetch failed");
+        })
+        .finally(() => { _fetchInFlight = null; });
     }
     await _fetchInFlight;
 
-    const rows = await db
-      .select({
-        dateKey: lotteryResultsTable.dateKey,
-        slot: lotteryResultsTable.slot,
-        number: lotteryResultsTable.number,
-      })
-      .from(lotteryResultsTable)
-      .where(gte(lotteryResultsTable.dateKey, RESULT_START_DATE))
-      .orderBy(desc(lotteryResultsTable.dateKey), desc(lotteryResultsTable.slot));
-
+    const rows = await readFromDb();
     const results = rowsToResultFormat(rows);
     _resultCache = { rows: results, at: now };
 
@@ -83,6 +91,20 @@ router.get("/results/toto-macau", async (req, res) => {
       res.json({ results: _resultCache.rows, source: "masterlive.net (stale)", fetchedAt: new Date(_resultCache.at).toISOString() });
       return;
     }
+
+    req.log.warn({ err }, "results: no cache available, reading directly from DB");
+    try {
+      const rows = await readFromDb();
+      if (rows.length > 0) {
+        const results = rowsToResultFormat(rows);
+        _resultCache = { rows: results, at: now };
+        res.json({ results, source: "db-fallback", fetchedAt: new Date(now).toISOString() });
+        return;
+      }
+    } catch (dbErr) {
+      req.log.error({ dbErr }, "results: DB fallback also failed");
+    }
+
     req.log.error({ err }, "Failed to fetch toto macau results");
     res.status(500).json({ error: "Failed to fetch results" });
   }

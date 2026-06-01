@@ -1,31 +1,43 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
 import { db, userDataTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const router = Router();
 
-function requireAuth(req: any, res: any, next: any) {
+interface AuthedRequest extends Request {
+  userId: string;
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
   const auth = getAuth(req);
   const userId = auth?.userId;
   if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
-  req.userId = userId;
+  (req as AuthedRequest).userId = userId;
   next();
 }
 
-router.get("/data", requireAuth, async (req: any, res: any) => {
+router.get("/data", requireAuth, async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest;
   try {
     const rows = await db
       .select()
       .from(userDataTable)
-      .where(eq(userDataTable.userId, req.userId))
+      .where(eq(userDataTable.userId, userId))
       .limit(1);
     if (!rows[0]) {
-      return res.json({ data: {} });
+      res.json({ data: {} });
+      return;
     }
-    const parsed = JSON.parse(rows[0].data || "{}");
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(rows[0].data || "{}");
+    } catch {
+      req.log.warn({ userId }, "userData: stored JSON was invalid, returning empty");
+    }
     res.json({ data: parsed });
   } catch (err) {
     req.log.error(err, "Failed to get user data");
@@ -33,14 +45,15 @@ router.get("/data", requireAuth, async (req: any, res: any) => {
   }
 });
 
-router.put("/data", requireAuth, async (req: any, res: any) => {
+router.put("/data", requireAuth, async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest;
   try {
-    const { data } = req.body;
+    const { data } = req.body as { data?: unknown };
     const serialized = JSON.stringify(data ?? {});
     await db
       .insert(userDataTable)
       .values({
-        userId: req.userId,
+        userId,
         data: serialized,
         updatedAt: new Date(),
       })

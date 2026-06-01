@@ -1,0 +1,1 @@
+- [Strategi Dashboard project](strategi-dashboard.md) — 4D Macau app: lib/db needs `typecheck:libs` before api-server typecheck; bulk upsert uses `sql\`excluded.column\``

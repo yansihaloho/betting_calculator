@@ -30,7 +30,7 @@ const H = {
 async function api(method: string, endpoint: string, body?: unknown): Promise<any> {
   const res = await fetch(`https://api.github.com/repos/${owner}/${repo}${endpoint}`, {
     method,
-    headers: H as HeadersInit,
+    headers: H as Record<string, string>,
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json() as any;

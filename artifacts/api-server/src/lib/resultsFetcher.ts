@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { lotteryResultsTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 export const RESULT_START_DATE = "2026-01-01";
@@ -94,6 +95,8 @@ async function fetchHtmlFromMasterlive(): Promise<string | null> {
   return null;
 }
 
+const BULK_CHUNK = 50;
+
 export async function fetchAndStoreFromMasterlive(): Promise<ParsedDraw[]> {
   try {
     const html = await fetchHtmlFromMasterlive();
@@ -104,15 +107,15 @@ export async function fetchAndStoreFromMasterlive(): Promise<ParsedDraw[]> {
       return [];
     }
 
-    for (const draw of draws) {
-      await db.insert(lotteryResultsTable).values({
-        dateKey: draw.dateKey,
-        slot: draw.slot,
-        number: draw.number,
-      }).onConflictDoUpdate({
-        target: [lotteryResultsTable.dateKey, lotteryResultsTable.slot],
-        set: { number: draw.number },
-      });
+    for (let i = 0; i < draws.length; i += BULK_CHUNK) {
+      const chunk = draws.slice(i, i + BULK_CHUNK);
+      await db
+        .insert(lotteryResultsTable)
+        .values(chunk.map(d => ({ dateKey: d.dateKey, slot: d.slot, number: d.number })))
+        .onConflictDoUpdate({
+          target: [lotteryResultsTable.dateKey, lotteryResultsTable.slot],
+          set: { number: sql`excluded.number` },
+        });
     }
 
     logger.info({ count: draws.length }, "masterlive.net: draws stored to DB");

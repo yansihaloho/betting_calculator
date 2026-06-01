@@ -35,7 +35,10 @@ app.use(
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-// CORS: in production restrict to known domains; dev allows any origin
+// CORS: in production restrict to known domains; dev allows any origin.
+// Use anchored suffix checks to prevent subdomain spoofing attacks.
+const SAFE_ORIGINS = /(?:^|\.)(replit\.dev|replit\.app)$/;
+
 const allowedOrigins = process.env.REPLIT_DOMAINS
   ? process.env.REPLIT_DOMAINS.split(",").flatMap(d => [
       `https://${d.trim()}`,
@@ -47,12 +50,16 @@ app.use(
   cors({
     credentials: true,
     origin(origin, callback) {
-      // Allow requests with no origin (server-to-server, curl) or dev mode
       if (!origin || process.env.NODE_ENV !== "production") {
         return callback(null, true);
       }
-      if (allowedOrigins.some(o => origin.startsWith(o)) || origin.includes("replit.dev") || origin.includes("replit.app")) {
-        return callback(null, true);
+      try {
+        const host = new URL(origin).hostname;
+        if (allowedOrigins.some(o => origin.startsWith(o)) || SAFE_ORIGINS.test(host)) {
+          return callback(null, true);
+        }
+      } catch {
+        // malformed origin — fall through to deny
       }
       callback(new Error(`CORS: origin ${origin} not allowed`));
     },
@@ -73,10 +80,14 @@ app.use(
 
 app.use("/api", router);
 
-// ── Global error handler ────────────────────────────────────────────────────
-app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+interface HttpError extends Error {
+  status?: number;
+  statusCode?: number;
+}
+
+app.use((err: HttpError, req: Request, res: Response, _next: NextFunction) => {
   req.log?.error({ err }, "Unhandled error");
-  const status = (err as any).status ?? (err as any).statusCode ?? 500;
+  const status = err.status ?? err.statusCode ?? 500;
   res.status(status).json({
     error: process.env.NODE_ENV === "production" ? "Internal server error" : err.message,
   });
