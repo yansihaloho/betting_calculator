@@ -139,11 +139,15 @@ function getLastResult(resultData: ResultRow[], slot: string): string | null {
   return null;
 }
 
-// Ambil SEMUA draw dari SEMUA slot — memberikan 900+ data point untuk analisis global
+// Ambil SEMUA draw dari SEMUA slot — newest-first, slot terbaru dalam hari muncul duluan
+// TIME_SLOTS dibalik: 23:00 → 22:00 → 19:00 → 16:00 → 13:00 → 00:01
+// Sehingga draw[0] selalu merupakan draw PALING BARU secara kronologis
+const TIME_SLOTS_DESC = [...TIME_SLOTS].reverse(); // ["23:00","22:00","19:00","16:00","13:00","00:01"]
+
 function getAllDraws(resultData: ResultRow[]): string[] {
   const out: string[] = [];
   for (const row of resultData) {
-    for (const slot of TIME_SLOTS) {
+    for (const slot of TIME_SLOTS_DESC) {
       const r = getResult(row, slot);
       if (r) out.push(r);
     }
@@ -614,7 +618,7 @@ function computeBBFS(pred: Pred4D, allDraws: string[]): BBFSResult {
   }
 
   // Langkah 5: Gabungkan semua sinyal
-  // 45% prediksi slot-spesifik + 25% frekuensi global + 15% gap global + 15% markov global
+  // 45% skor ensemble 13 engine (semua sudah global) + 25% frekuensi global + 15% gap global + 15% markov global
   const globalDigitScores = predScore.map((ps, d) =>
     0.45 * ps + 0.25 * globalFreq[d] + 0.15 * globalGap[d] + 0.15 * markovGlobal[d]
   );
@@ -638,20 +642,24 @@ function computeBBFS(pred: Pred4D, allDraws: string[]): BBFSResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENGINE WEIGHTS (default — can be adapted via backtest)
 // ═══════════════════════════════════════════════════════════════════════════════
+// Bobot di-tune ulang setelah E01-E12 semua menggunakan 907+ draw global.
+// E03 (Markov) paling kuat: 36x lebih banyak transisi → jauh lebih reliable.
+// E02 (Poisson Gap) juga sangat kuat dengan dataset besar.
+// E04/E05 tetap tinggi karena satu-satunya yang membawa sinyal slot-spesifik.
 const DEFAULT_WEIGHTS = [
-  19, // E01 Multi-window Recency
-  17, // E02 Poisson Gap
-  14, // E03 2nd-order Markov
-  10, // E04 Slot Transition+
-   8, // E05 Day×Slot
-   7, // E06 Momentum+Accel
-   6, // E07 Cross-position Corr
-   5, // E08 Cyclic Detection
-   4, // E09 Hot/Cold Streak
-   3, // E10 Balance
-   2, // E11 Sum Pattern
-   1, // E12 Repeat Pattern
-   8, // E13 All-Slot Global Freq  (900+ draw data)
+  10, // E01 Multi-window Recency      (global, 907+ draw — decay tetap memberi bobot recency)
+  13, // E02 Poisson Gap               (global, sangat kuat dengan banyak data)
+  15, // E03 2nd-order Markov          (global, 36x lebih banyak transisi → terkuat)
+  12, // E04 Slot Transition+          (slot-spesifik — satu-satunya sinyal transisi antar-slot)
+   9, // E05 Day×Slot                  (slot-spesifik — pola hari+slot)
+   8, // E06 Momentum+Accel            (global)
+   9, // E07 Cross-position Corr       (global, jauh lebih baik dengan 907+ draw)
+   7, // E08 Cyclic Detection          (global, deteksi siklus butuh banyak data)
+   7, // E09 Hot/Cold Streak           (global)
+   5, // E10 Balance                   (global)
+   4, // E11 Sum Pattern               (global)
+   4, // E12 Repeat Pattern            (slot-spesifik — last slot draw reference)
+   9, // E13 All-Slot Global Freq      (global, dedicated frequency analysis)
 ]; // combineScores normalises by totalW automatically
 
 // ── Score combiner ────────────────────────────────────────────────────────────
@@ -711,9 +719,13 @@ function predictPosition(
   dayName: string,
   allDraws: string[],
 ): PosResult {
-  const draws = getDrawsForSlot(resultData, slot);
+  // slotDraws: hanya draw dari slot target (~25 draw di 2026)
+  // allDraws : semua 907+ draw dari semua slot (data utama semua engine)
+  const slotDraws = getDrawsForSlot(resultData, slot);
+  const prevSlot  = PREV_SLOT[slot];
 
-  if (draws.length < 5) {
+  // Butuh minimal 5 draw global untuk analisis bermakna
+  if (allDraws.length < 5) {
     const uniform = new Array(10).fill(10);
     const top3 = [0, 1, 2].map(d => ({ digit: d, score: 10 }));
     return {
@@ -723,22 +735,24 @@ function predictPosition(
     };
   }
 
-  const prevSlot = PREV_SLOT[slot];
-
+  // ── E01-E03, E06-E11, E13: pakai SEMUA 907+ draw (signal statistik jauh lebih kuat)
+  // ── E04, E05           : pakai resultData (slot-context preserving)
+  // ── E12                : pakai slotDraws untuk referensi "last draw slot ini"
+  const e12src = slotDraws.length >= 3 ? slotDraws : allDraws.slice(0, 10);
   const engineScores = [
-    e01_multiRecency(draws, pos),
-    e02_poissonGap(draws, pos),
-    e03_markov2(draws, pos),
-    e04_slotTransition(resultData, slot, prevSlot, pos),
-    e05_daySlot(resultData, slot, dayName, pos),
-    e06_momentum(draws, pos),
-    e07_crossCorr(draws, pos),
-    e08_cyclic(draws, pos),
-    e09_streak(draws, pos),
-    e10_balance(draws, pos),
-    e11_sumPattern(draws, pos),
-    e12_repeatPattern(draws, pos),
-    e13_allSlotFreq(allDraws, pos),   // E13: semua 900+ draw dari semua slot
+    e01_multiRecency(allDraws, pos),                         // E01: global recency (907+ draw)
+    e02_poissonGap(allDraws, pos),                           // E02: global gap — jauh lebih akurat
+    e03_markov2(allDraws, pos),                              // E03: global Markov — 36x lebih banyak transisi
+    e04_slotTransition(resultData, slot, prevSlot, pos),     // E04: slot-specific transition
+    e05_daySlot(resultData, slot, dayName, pos),             // E05: day×slot pattern
+    e06_momentum(allDraws, pos),                             // E06: global momentum
+    e07_crossCorr(allDraws, pos),                            // E07: global cross-position (907+ draw)
+    e08_cyclic(allDraws, pos),                               // E08: global cyclic detection
+    e09_streak(allDraws, pos),                               // E09: global hot/cold streak
+    e10_balance(allDraws, pos),                              // E10: global balance
+    e11_sumPattern(allDraws, pos),                           // E11: global sum pattern
+    e12_repeatPattern(e12src, pos),                          // E12: last slot draw reference
+    e13_allSlotFreq(allDraws, pos),                          // E13: dedicated global frequency
   ];
 
   const scores = combineScores(engineScores, DEFAULT_WEIGHTS);
@@ -752,7 +766,7 @@ function predictPosition(
   const altDigit = ranked[1].digit;
   const top3 = ranked.slice(0, 3);
 
-  // Confidence: blend of score margin, Borda margin, and engine agreement
+  // Confidence: score margin + Borda margin + engine agreement + data volume bonus
   const scoreMargin = ranked[0].score - ranked[1].score;
   const topAgreement = agreementPct[topDigit];
   const bordaRanked = [...bordaScores].sort((a, b) => b - a);
@@ -760,15 +774,14 @@ function predictPosition(
     ? Math.round(((bordaRanked[0] - bordaRanked[1]) / bordaRanked[0]) * 100)
     : 0;
 
+  // Volume bonus: semakin banyak data global, semakin tinggi kepercayaan baseline
+  const volBonus = allDraws.length > 800 ? 12
+    : allDraws.length > 400 ? 8
+    : allDraws.length > 100 ? 4 : 0;
+
   const confidence = Math.min(
     99,
-    Math.round(
-      40
-      + scoreMargin * 1.5
-      + topAgreement * 0.3
-      + bordaMargin * 0.2
-      + (draws.length > 100 ? 8 : draws.length > 50 ? 4 : 0)
-    ),
+    Math.round(40 + scoreMargin * 1.5 + topAgreement * 0.3 + bordaMargin * 0.2 + volBonus),
   );
 
   return { scores, topDigit, altDigit, top3, confidence, engineScores, bordaScores, agreementPct };
@@ -1067,10 +1080,14 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
     return ps ? getLastResult(resultData, ps) : null;
   }, [resultData, activeSlot]);
 
-  const dataCount = useMemo(
+  // slotCount: draw slot-spesifik (untuk konteks E04/E05/E12)
+  // allDraws sudah dihitung di atas — ini yang dipakai semua engine utama
+  const slotCount = useMemo(
     () => getDrawsForSlot(resultData, activeSlot).length,
     [resultData, activeSlot],
   );
+  // dataCount yang ditampilkan = total draw global (lebih merepresentasikan kekuatan analisis)
+  const dataCount = allDraws.length;
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [showCandidates, setShowCandidates] = useState(true);
@@ -1163,7 +1180,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
           { l: "Hit Rate 4D", v: `${backtest.rate4D}%`, s: `${backtest.correct4D}/${backtest.total} draw` },
           { l: "Hit Rate 2D", v: `${backtest.rate2D}%`, s: "Kepala+Ekor tepat" },
           { l: "Total Tes",   v: String(backtest.total), s: "draw diuji" },
-          { l: "Data Slot",  v: String(dataCount), s: "draw historis" },
+          { l: "Data Global", v: String(dataCount), s: "draw semua slot" },
         ].map(it => `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;text-align:center">
           <div style="font-size:20px;font-weight:900;color:#7c3aed">${it.v}</div>
           <div style="font-size:9px;color:#475569;font-weight:700;margin-top:2px">${it.l}</div>
@@ -1259,7 +1276,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
   <div style="color:#94a3b8;font-size:9px;text-align:right;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px;line-height:1.7">
     4D Macau Strategi Dashboard &nbsp;·&nbsp; Smart Prediction AI V2 &nbsp;·&nbsp; 13 Engine Analitik<br>
     Slot: ${activeSlot} WIB &nbsp;·&nbsp; ${dateStr} &nbsp;·&nbsp; Dibuat: ${timestamp} WIB<br>
-    Data: ${dataCount} draw slot-spesifik + ${allDraws.length} draw global lintas slot
+    Data: ${dataCount} draw global (semua slot) · E04+E05 menggunakan konteks slot ${activeSlot}
   </div>
 
   <script>window.onload = () => { window.print(); }</script>
@@ -1472,7 +1489,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${pill("emerald")}`}>POISSON GAP</span>
             </div>
             <p className={`text-xs ${subtle}`}>
-              {dataCount} draw dianalisis · Korelasi antar posisi · Deteksi siklus · Adaptive ensemble
+              {dataCount} draw global · 11 engine pakai data penuh · E04+E05 slot-konteks · Adaptive ensemble
             </p>
           </div>
 
@@ -2159,7 +2176,7 @@ export default function SmartPredictionV2({ resultData, isDark }: Props) {
           <div className={`p-3 rounded-xl text-[10px] leading-relaxed ${isDark ? "bg-white/3 text-white/40" : "bg-slate-50 text-slate-500"}`}>
             <span className="font-bold">Cara pakai BBFS:</span> Pilih semua nomor 4D yang terbentuk dari kombinasi digit BBFS yang dipilih.
             BBFS 5 menghasilkan 5×5×5×5 = 625 nomor, BBFS 7 menghasilkan 7×7×7×7 = 2401 nomor.
-            Digit dipilih berdasarkan analisis gabungan: skor 13 engine slot-spesifik + frekuensi global {allDraws.length} draw + sinyal gap + Markov global.
+            Digit dipilih berdasarkan analisis gabungan: skor 13 engine ({allDraws.length} draw global) + frekuensi global + sinyal gap + Markov global.
             <span className="block mt-1 font-bold text-amber-500/80">⚠ Tidak ada sistem yang menjamin kemenangan 100% — gunakan dengan bijak.</span>
           </div>
         </div>
