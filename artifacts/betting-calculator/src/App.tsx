@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ClerkProvider, Show, useClerk, useUser } from "@clerk/react";
+import { ClerkProvider, useClerk, useUser } from "@clerk/react";
 import { dark } from "@clerk/themes";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { Switch, Route, useLocation, Router as WouterRouter } from "wouter";
@@ -8,7 +8,6 @@ import Calculator from "@/pages/Calculator";
 import SignInPage from "@/pages/SignInPage";
 import SignUpPage from "@/pages/SignUpPage";
 import DataSync from "@/components/DataSync";
-import Logo from "@/components/Logo";
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -74,61 +73,6 @@ const clerkAppearance = {
   },
 };
 
-function LandingPage() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-4">
-      {/* Ambient glow */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-blue-600 rounded-full blur-[120px] opacity-10" />
-      </div>
-      <div className="relative max-w-sm w-full text-center space-y-7">
-        {/* Logo + title */}
-        <div className="space-y-4">
-          <div className="flex justify-center">
-            <div className="relative">
-              <Logo size={88} className="drop-shadow-2xl" />
-              <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-slate-950 flex items-center justify-center">
-                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-              </span>
-            </div>
-          </div>
-          <div>
-            <h1 className="text-3xl font-black text-white tracking-tight">4D Macau</h1>
-            <p className="text-blue-400 font-bold text-sm mt-0.5 tracking-widest uppercase">Strategi Dashboard</p>
-          </div>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            Kalkulator strategi Toto Macau dengan histori, analitik, dan sinkronisasi data antar perangkat.
-          </p>
-        </div>
-
-        {/* Feature pills */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {["Smart AI Prediksi", "Live Result", "Multi-Perangkat"].map(f => (
-            <span key={f} className="text-xs font-bold px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300">{f}</span>
-          ))}
-        </div>
-
-        {/* CTA buttons */}
-        <div className="space-y-3">
-          <a
-            href={`${basePath}/sign-in`}
-            className="flex items-center justify-center w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black text-base transition-all shadow-lg shadow-blue-500/25 active:scale-95"
-          >
-            Masuk dengan Akun
-          </a>
-          <a
-            href={`${basePath}/sign-up`}
-            className="flex items-center justify-center w-full py-4 rounded-2xl bg-white/8 hover:bg-white/12 text-white font-bold text-base border border-white/10 transition-all active:scale-95"
-          >
-            Buat Akun Baru
-          </a>
-        </div>
-
-        <p className="text-slate-600 text-xs">🔒 Data tersimpan aman per akun • Sinkron lintas perangkat</p>
-      </div>
-    </div>
-  );
-}
 
 function AppContent() {
   const { signOut } = useClerk();
@@ -170,16 +114,7 @@ function AppContent() {
 }
 
 function HomeRoute() {
-  return (
-    <>
-      <Show when="signed-in">
-        <AppContent />
-      </Show>
-      <Show when="signed-out">
-        <LandingPage />
-      </Show>
-    </>
-  );
+  return <AppContent />;
 }
 
 function ClerkProviderWithRoutes() {
