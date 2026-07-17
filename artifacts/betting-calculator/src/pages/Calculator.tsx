@@ -9,6 +9,8 @@ import AnalisisNomor from "./AnalisisNomor";
 import Analisis2 from "./Analisis2";
 import SmartPrediction from "./SmartPrediction";
 import SmartPredictionV2 from "./SmartPredictionV2";
+import AnalisaProPage from "./AnalisaProPage";
+import TwoDBelakangPage from "./TwoDBelakangPage";
 import Kalender from "./Kalender";
 import RumusPage from "./RumusPage";
 import Logo from "@/components/Logo";
@@ -103,7 +105,7 @@ function isNomorMenang(angka: string, nomorList: string): boolean {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "saldo" | "prediksi" | "prediksi2" | "prediksi3" | "berantai" | "analisis" | "analisis2" | "live" | "kalender" | "rumus" | "cerdas" | "kelly" | "akurasi";
+type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "saldo" | "prediksi" | "prediksi2" | "prediksi3" | "berantai" | "analisis" | "analisis2" | "live" | "kalender" | "rumus" | "cerdas" | "kelly" | "akurasi" | "analisapro" | "2dbelakang";
 interface PutaranData { putaran:number; taruhan:number; modal:number; akumulasi:number; hadiah:number; profit:number; }
 type SyncStatus = "idle" | "loading" | "saving" | "synced" | "error" | "offline";
 type ResultSource = "live" | "lokal" | "loading";
@@ -1413,6 +1415,8 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
             { id:"live",       icon:<Tv className="w-3.5 h-3.5"/>       , label:"LIVE",       grad:"from-red-500 to-pink-600",       shadow:"shadow-red-500/40" },
             { id:"kelly",      icon:<Shield className="w-3.5 h-3.5"/>   , label:"Kelly",      grad:"from-violet-500 to-purple-600",  shadow:"shadow-violet-500/40" },
             { id:"akurasi",    icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Akurasi",    grad:"from-orange-400 to-rose-500",    shadow:"shadow-orange-500/40" },
+            { id:"analisapro", icon:<Sparkles className="w-3.5 h-3.5"/>, label:"Analisa Pro", grad:"from-violet-500 to-purple-700",   shadow:"shadow-violet-500/40" },
+            { id:"2dbelakang", icon:<Hash className="w-3.5 h-3.5"/>     , label:"2D Belakang", grad:"from-rose-500 to-red-700",        shadow:"shadow-rose-500/40" },
           ] as { id: MenuItem; icon: React.ReactNode; label: string; grad: string; shadow: string }[]).map(item => (
             <button
               key={item.id}
@@ -1488,6 +1492,8 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
                 live:{label:"🔴 LIVE",color:"#ef4444"},
                 kelly:{label:"Kelly",color:"#8b5cf6"},
                 akurasi:{label:"Akurasi",color:"#f97316"},
+                analisapro:{label:"Analisa Pro",color:"#7c3aed"},
+                "2dbelakang":{label:"2D Belakang",color:"#e11d48"},
               };
               const pm = PAGE_META[menu];
               return (
@@ -2422,6 +2428,16 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
           <div className="animate-slide-up">
             <KellyCriterion isDark={isDark} saldo={saldo} />
           </div>
+        )}
+
+        {/* ══ ANALISA PRO ══ */}
+        {menu === "analisapro" && (
+          <AnalisaProPage resultData={resultData} isDark={isDark} />
+        )}
+
+        {/* ══ 2D BELAKANG ══ */}
+        {menu === "2dbelakang" && (
+          <TwoDBelakangPage resultData={resultData} isDark={isDark} />
         )}
 
         {/* ══ HISTORY AKURASI ══ */}

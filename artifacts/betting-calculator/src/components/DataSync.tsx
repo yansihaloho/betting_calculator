@@ -15,6 +15,7 @@ const SYNC_KEYS = [
   "strategi_data_v6",  // contains saldo, histori, laporan, taruhanAwal, etc.
   "saldo_tx",          // SaldoPage transaction history
   "smartai_evals",     // SmartPredictionV2 evaluation history (predicted vs actual)
+  "2d_belakang_history", // TwoDBelakangPage riwayat kill/live analysis
 ];
 
 function readAll(): Record<string, string> {
