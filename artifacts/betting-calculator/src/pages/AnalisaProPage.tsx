@@ -47,6 +47,7 @@ interface Props { resultData: ResultRow[]; isDark: boolean }
 export default function AnalisaProPage({ resultData, isDark }: Props) {
   const [n, setN] = useState(30);
   const [activeSlot, setActiveSlot] = useState("semua");
+  const [view, setView] = useState<"analisa" | "bandingkan">("analisa");
   const [openSection, setOpenSection] = useState<string>("freq");
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -62,6 +63,50 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
     [allDraws, resultData, activeSlot]
   );
   const draws = useMemo(() => slotDraws.slice(0, n), [slotDraws, n]);
+
+  // ── Per-slot comparison data ──────────────────────────────────────────────
+  const slotStats = useMemo(() => {
+    return TIME_SLOTS.map(slot => {
+      const sd = extractSlotDraws(resultData, slot).slice(0, n);
+      if (!sd.length) return { slot, count: 0, hot: [], warm: [], cold: [], xCold: [], posTop: ["–","–","–","–"], bbfs6: [] };
+
+      // Global digit frequency
+      const gFreq = Array(10).fill(0);
+      sd.forEach(d => d.split("").forEach(c => { gFreq[parseInt(c)]++; }));
+      const ranked = gFreq.map((v, i) => ({ digit: i, count: v })).sort((a, b) => b.count - a.count);
+
+      // Per-position top digit
+      const posTop = [0,1,2,3].map(pi => {
+        const pf = Array(10).fill(0);
+        sd.forEach(d => { pf[parseInt(d[pi])]++; });
+        const topIdx = pf.indexOf(Math.max(...pf));
+        return String(topIdx);
+      });
+
+      // BBFS-6: top 6 most balanced digits (appear in ≥2 positions, then by total freq)
+      const posFreqs = [0,1,2,3].map(pi => {
+        const pf = Array(10).fill(0);
+        sd.forEach(d => { pf[parseInt(d[pi])]++; });
+        return pf;
+      });
+      const balanced = Array(10).fill(0).map((_, d) => {
+        const posCount = posFreqs.filter(pf => pf[d] > 0).length;
+        return { digit: d, posCount, total: gFreq[d] };
+      }).sort((a, b) => b.posCount - a.posCount || b.total - a.total);
+      const bbfs6 = balanced.slice(0, 6).map(x => x.digit).sort((a,b) => a-b);
+
+      return {
+        slot,
+        count: sd.length,
+        hot:   ranked.slice(0, 3).map(x => x.digit),
+        warm:  ranked.slice(3, 6).map(x => x.digit),
+        cold:  ranked.slice(6, 8).map(x => x.digit),
+        xCold: ranked.slice(8, 10).map(x => x.digit),
+        posTop,
+        bbfs6,
+      };
+    });
+  }, [resultData, n]);
 
   function doCopy(text: string, key: string) {
     if (copyText(text)) {
@@ -366,58 +411,236 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
           <div>
             <h1 className="text-xl md:text-2xl font-black">Analisa Pro AI</h1>
             <p className="opacity-70 text-xs mt-0.5">
-              12-Step Analisis Statistik — {draws.length} draw
-              {activeSlot !== "semua" && <span className="ml-1 font-black">· Slot {activeSlot}</span>}
+              {view === "bandingkan"
+                ? `Perbandingan 6 Slot — basis ${n} draw`
+                : <>12-Step Analisis Statistik — {draws.length} draw{activeSlot !== "semua" && <span className="ml-1 font-black">· Slot {activeSlot}</span>}</>}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs opacity-70">Gunakan</span>
+            {/* View toggle */}
+            <div className="flex rounded-xl overflow-hidden border border-white/20">
+              <button onClick={() => setView("analisa")}
+                className={`px-3 py-1.5 text-xs font-black transition-all ${view === "analisa" ? "bg-white text-purple-700" : "hover:bg-white/15"}`}>
+                Analisa
+              </button>
+              <button onClick={() => setView("bandingkan")}
+                className={`px-3 py-1.5 text-xs font-black transition-all ${view === "bandingkan" ? "bg-white text-purple-700" : "hover:bg-white/15"}`}>
+                Bandingkan Slot
+              </button>
+            </div>
+            <span className="text-xs opacity-70">|</span>
+            <span className="text-xs opacity-70">Draw:</span>
             {[18, 30, 42].map(v => (
               <button key={v} onClick={() => setN(v)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${n === v ? "bg-white text-purple-700" : "bg-white/20 hover:bg-white/30"}`}>
                 {v}
               </button>
             ))}
-            <span className="text-xs opacity-70">draw</span>
           </div>
         </div>
-        {/* Slot selector */}
-        <div className="flex flex-wrap gap-1.5 mt-3">
-          {["semua", ...TIME_SLOTS].map(slot => (
-            <button
-              key={slot}
-              onClick={() => setActiveSlot(slot)}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition-all ${
-                activeSlot === slot
-                  ? "bg-white text-purple-700 shadow-sm"
-                  : "bg-white/15 hover:bg-white/25"
-              }`}
-            >
-              {slot === "semua" ? "Semua" : slot}
-              {slot !== "semua" && (
-                <span className="ml-1 opacity-70 font-normal">{SLOT_NAMES[slot]?.split(" ")[0]}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        {/* Quick summary pills */}
-        <div className="flex flex-wrap gap-2 mt-3">
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
-            🔥 HOT: {hotDigits.join(", ")}
-          </span>
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
-            ❄️ COLD: {[...coldDigits, ...xColdDigits].join(", ")}
-          </span>
-          {sumData && (
+        {/* Slot selector — only in analisa view */}
+        {view === "analisa" && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {["semua", ...TIME_SLOTS].map(slot => (
+              <button
+                key={slot}
+                onClick={() => setActiveSlot(slot)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition-all ${
+                  activeSlot === slot
+                    ? "bg-white text-purple-700 shadow-sm"
+                    : "bg-white/15 hover:bg-white/25"
+                }`}
+              >
+                {slot === "semua" ? "Semua" : slot}
+                {slot !== "semua" && (
+                  <span className="ml-1 opacity-70 font-normal">{SLOT_NAMES[slot]?.split(" ")[0]}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Quick summary pills — analisa view only */}
+        {view === "analisa" && (
+          <div className="flex flex-wrap gap-2 mt-3">
             <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
-              📊 Range Aman: {sumData.safeMin}–{sumData.safeMax}
+              🔥 HOT: {hotDigits.join(", ")}
             </span>
-          )}
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
-            🎯 BBFS-8: {bbfs8.join("")}
-          </span>
-        </div>
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
+              ❄️ COLD: {[...coldDigits, ...xColdDigits].join(", ")}
+            </span>
+            {sumData && (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
+                📊 Range Aman: {sumData.safeMin}–{sumData.safeMax}
+              </span>
+            )}
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/15">
+              🎯 BBFS-8: {bbfs8.join("")}
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* ══ BANDINGKAN SLOT VIEW ══════════════════════════════════════════════ */}
+      {view === "bandingkan" && (
+        <div className="space-y-4">
+          {/* Legend */}
+          <div className={`${card} px-5 py-3`}>
+            <div className="flex flex-wrap gap-3 text-xs items-center">
+              <span className="font-black opacity-60">Legenda:</span>
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-bold ${isDark ? "bg-orange-500/20 text-orange-300" : "bg-orange-100 text-orange-700"}`}>🔥 HOT — 3 terbanyak</span>
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-bold ${isDark ? "bg-yellow-500/20 text-yellow-300" : "bg-yellow-100 text-yellow-700"}`}>🌤️ WARM — 3 berikutnya</span>
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-bold ${isDark ? "bg-blue-500/20 text-blue-300" : "bg-blue-100 text-blue-700"}`}>❄️ COLD — 4 paling jarang</span>
+              <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-bold ${isDark ? "bg-violet-500/20 text-violet-300" : "bg-violet-100 text-violet-700"}`}>🎯 BBFS-6 — 6 digit paling seimbang</span>
+            </div>
+          </div>
+
+          {/* Card per slot */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {slotStats.map(ss => {
+              const DigitBadge = ({ d, type }: { d: number; type: "hot"|"warm"|"cold"|"xcold" }) => {
+                const cls = type === "hot"   ? isDark ? "bg-orange-500/25 text-orange-300 ring-1 ring-orange-500/30" : "bg-orange-100 text-orange-700 ring-1 ring-orange-300"
+                          : type === "warm"  ? isDark ? "bg-yellow-500/20 text-yellow-300 ring-1 ring-yellow-500/30" : "bg-yellow-100 text-yellow-700 ring-1 ring-yellow-300"
+                          : type === "cold"  ? isDark ? "bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/25" : "bg-blue-100 text-blue-700 ring-1 ring-blue-200"
+                          : isDark ? "bg-slate-700/60 text-white/25 ring-1 ring-white/5" : "bg-slate-100 text-slate-300 ring-1 ring-slate-200";
+                return (
+                  <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black ${cls}`}>{d}</span>
+                );
+              };
+              return (
+                <div key={ss.slot} className={`${card} p-4 space-y-3`}>
+                  {/* Slot header */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-black text-base">{ss.slot}</div>
+                      <div className={`text-[11px] ${muted}`}>{SLOT_NAMES[ss.slot]} · {ss.count} draw</div>
+                    </div>
+                    {ss.count === 0 && (
+                      <span className={`text-[11px] ${muted}`}>Tidak ada data</span>
+                    )}
+                  </div>
+
+                  {ss.count > 0 && (
+                    <>
+                      {/* Digit rows */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black w-14 shrink-0 ${muted}`}>🔥 HOT</span>
+                          <div className="flex gap-1.5">
+                            {ss.hot.map(d => <DigitBadge key={d} d={d} type="hot" />)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black w-14 shrink-0 ${muted}`}>🌤️ WARM</span>
+                          <div className="flex gap-1.5">
+                            {ss.warm.map(d => <DigitBadge key={d} d={d} type="warm" />)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black w-14 shrink-0 ${muted}`}>❄️ COLD</span>
+                          <div className="flex gap-1.5">
+                            {ss.cold.map(d => <DigitBadge key={d} d={d} type="cold" />)}
+                            {ss.xCold.map(d => <DigitBadge key={d} d={d} type="xcold" />)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Per-posisi top digit */}
+                      <div className={`rounded-xl p-3 ${isDark ? "bg-white/5" : "bg-slate-50"}`}>
+                        <div className={`text-[10px] font-black mb-2 ${muted}`}>DIGIT TERKUAT PER POSISI</div>
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                          {["As","Kop","Kepala","Ekor"].map((lbl, i) => (
+                            <div key={lbl} className="space-y-0.5">
+                              <div className={`text-[9px] ${muted} font-bold`}>{lbl}</div>
+                              <div className={`text-xl font-black ${isDark ? "text-white" : "text-slate-800"}`}>{ss.posTop[i]}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* BBFS-6 */}
+                      <div className={`rounded-xl px-3 py-2.5 flex items-center justify-between ${isDark ? "bg-violet-500/10 ring-1 ring-violet-500/20" : "bg-violet-50 ring-1 ring-violet-200"}`}>
+                        <span className={`text-[10px] font-black ${isDark ? "text-violet-400" : "text-violet-600"}`}>🎯 BBFS-6</span>
+                        <div className="flex gap-1">
+                          {ss.bbfs6.map(d => (
+                            <span key={d} className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${isDark ? "bg-violet-500/25 text-violet-300" : "bg-violet-100 text-violet-700"}`}>{d}</span>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => doCopy(ss.bbfs6.join(""), `bbfs6-${ss.slot}`)}
+                          className={`p-1.5 rounded-lg transition-all ${isDark ? "hover:bg-violet-500/20 text-violet-400" : "hover:bg-violet-100 text-violet-500"}`}>
+                          {copied === `bbfs6-${ss.slot}` ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Cross-slot HOT digit heatmap */}
+          <div className={`${card} p-5`}>
+            <div className="flex items-center gap-2 mb-4">
+              <Flame className="w-4 h-4 text-orange-400" />
+              <span className="font-black text-sm">Heatmap Digit HOT Lintas Slot</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className={`text-left pb-2 pr-4 font-black ${muted}`}>Digit</th>
+                    {TIME_SLOTS.map(sl => (
+                      <th key={sl} className={`text-center pb-2 px-2 font-black ${muted}`}>{sl}</th>
+                    ))}
+                    <th className={`text-center pb-2 pl-2 font-black ${muted}`}>Total HOT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 10 }, (_, d) => {
+                    const hotInSlots = slotStats.filter(ss => ss.hot.includes(d));
+                    const warmInSlots = slotStats.filter(ss => ss.warm.includes(d));
+                    const totalScore = hotInSlots.length * 3 + warmInSlots.length * 1;
+                    return (
+                      <tr key={d} className={`border-t ${isDark ? "border-white/5" : "border-slate-100"}`}>
+                        <td className="py-2 pr-4">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg font-black text-sm ${isDark ? "bg-white/8 text-white" : "bg-slate-100 text-slate-700"}`}>{d}</span>
+                        </td>
+                        {slotStats.map(ss => {
+                          const isHot  = ss.hot.includes(d);
+                          const isWarm = ss.warm.includes(d);
+                          const isCold = ss.cold.includes(d) || ss.xCold.includes(d);
+                          return (
+                            <td key={ss.slot} className="text-center px-2">
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-xs font-black ${
+                                isHot  ? isDark ? "bg-orange-500/30 text-orange-300" : "bg-orange-100 text-orange-700"
+                                : isWarm ? isDark ? "bg-yellow-500/20 text-yellow-300" : "bg-yellow-100 text-yellow-700"
+                                : isCold ? isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-500"
+                                : isDark ? "bg-white/5 text-white/20" : "bg-slate-50 text-slate-300"
+                              }`}>
+                                {isHot ? "🔥" : isWarm ? "🌤" : isCold ? "❄" : "·"}
+                              </span>
+                            </td>
+                          );
+                        })}
+                        <td className="text-center pl-2">
+                          <span className={`inline-flex items-center justify-center px-2 h-7 rounded-lg font-black text-xs ${
+                            totalScore >= 9  ? isDark ? "bg-orange-500/30 text-orange-300" : "bg-orange-100 text-orange-700"
+                            : totalScore >= 5 ? isDark ? "bg-yellow-500/20 text-yellow-300" : "bg-yellow-100 text-yellow-700"
+                            : isDark ? "bg-white/5 text-white/30" : "bg-slate-100 text-slate-400"
+                          }`}>{totalScore}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className={`text-[11px] ${muted} mt-3`}>
+              Skor = 3 poin tiap slot HOT + 1 poin tiap slot WARM. Digit dengan skor tinggi konsisten muncul di banyak slot.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Prediksi Utama — always visible ── */}
       <div className={`${card} p-5`}>
