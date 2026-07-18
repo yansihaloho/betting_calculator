@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   Trash2, RefreshCw, Copy, CheckCircle2, Clock, ChevronDown, ChevronUp,
-  Hash, TrendingUp, BookOpen, Eye, EyeOff, Flame,
+  Hash, TrendingUp, BookOpen, Eye, EyeOff, Flame, Target,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,6 +32,8 @@ interface HistoryEntry {
   live: string[];
   nextDraws: string[];
   hits: string[];
+  watermark?: string; // "tanggal|slot|num" of most-recent draw at save time
+  newDrawsSeen?: number; // how many new draws have been checked
 }
 
 const LS_KEY = "2d_belakang_history";
@@ -106,22 +108,75 @@ export default function TwoDBelakangPage({ resultData, isDark }: Props) {
     }
   }
 
+  // Build watermark from the most-recent draw at save time
+  function buildWatermark(ekor: typeof allEkor): string {
+    if (!ekor.length) return "";
+    const e = ekor[0];
+    return `${e.tanggal}|${e.slot}|${e.num}`;
+  }
+
+  // Find index of the watermark draw in allEkor; returns -1 if not found
+  function findWatermarkIdx(ekor: typeof allEkor, wm: string): number {
+    return ekor.findIndex(e => `${e.tanggal}|${e.slot}|${e.num}` === wm);
+  }
+
+  function computeHitsFromWatermark(entry: HistoryEntry, ekor: typeof allEkor): { hits: string[]; newDrawsSeen: number } {
+    if (!entry.watermark) return { hits: entry.hits, newDrawsSeen: 0 };
+    const wmIdx = findWatermarkIdx(ekor, entry.watermark);
+    // Draws with index < wmIdx are newer (allEkor is newest-first)
+    const newDraws = wmIdx > 0 ? ekor.slice(0, wmIdx).map(e => e.num) : [];
+    const hits = newDraws.filter(n => entry.live.includes(n));
+    return { hits, newDrawsSeen: newDraws.length };
+  }
+
   function saveToHistory() {
-    const recent5 = allEkor.slice(0, 5).map(e => e.num);
-    const hits = recent5.filter(n => analysis.live.includes(n));
+    const wm = buildWatermark(allEkor);
     const entry: HistoryEntry = {
       id: Date.now().toString(),
       tanggal: new Date().toLocaleString("id-ID"),
       killed: analysis.killed,
       live: analysis.live,
       nextDraws: [],
-      hits,
+      hits: [],
+      watermark: wm,
+      newDrawsSeen: 0,
     };
     const updated = [entry, ...history].slice(0, 20);
     setHistory(updated);
     saveHistory(updated);
     toast.success("Disimpan ke riwayat!");
   }
+
+  function updateAccuracy(id: string) {
+    const updated = history.map(entry => {
+      if (entry.id !== id) return entry;
+      const { hits, newDrawsSeen } = computeHitsFromWatermark(entry, allEkor);
+      return { ...entry, hits, newDrawsSeen };
+    });
+    setHistory(updated);
+    saveHistory(updated);
+    const entry = updated.find(e => e.id === id);
+    if (entry) {
+      toast.success(`Akurasi diperbarui — ${entry.newDrawsSeen ?? 0} draw baru, ${entry.hits.length} hit`);
+    }
+  }
+
+  function updateAllAccuracy() {
+    const updated = history.map(entry => {
+      if (!entry.watermark) return entry;
+      const { hits, newDrawsSeen } = computeHitsFromWatermark(entry, allEkor);
+      return { ...entry, hits, newDrawsSeen };
+    });
+    setHistory(updated);
+    saveHistory(updated);
+  }
+
+  // Auto-refresh accuracy whenever resultData changes
+  useEffect(() => {
+    if (history.length === 0) return;
+    updateAllAccuracy();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allEkor]);
 
   function deleteHistory(id: string) {
     const updated = history.filter(h => h.id !== id);
@@ -401,20 +456,49 @@ export default function TwoDBelakangPage({ resultData, isDark }: Props) {
               <div className="divide-y divide-white/5">
                 {history.map(entry => {
                   const hitCount = entry.hits.length;
+                  const newDrawsSeen = entry.newDrawsSeen ?? 0;
+                  const hitRate = newDrawsSeen > 0 ? Math.round((hitCount / newDrawsSeen) * 100) : null;
+                  const hasWatermark = !!entry.watermark;
                   return (
                     <div key={entry.id} className="px-5 py-4 space-y-3">
-                      <div className="flex items-center justify-between">
+                      {/* Entry header */}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
                         <div>
                           <div className="font-black text-sm">{entry.tanggal}</div>
                           <div className={`text-xs ${muted}`}>
-                            Kill {entry.killed.length} angka → Hidup {entry.live.length} angka
+                            Kill {entry.killed.length} → Hidup {entry.live.length} angka
+                            {newDrawsSeen > 0 && (
+                              <span className="ml-2 opacity-70">· {newDrawsSeen} draw dicek</span>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {hitCount > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Hit rate badge */}
+                          {hitRate !== null && (
+                            <span className={`text-xs font-black px-2.5 py-1 rounded-full ${
+                              hitRate >= 50
+                                ? isDark ? "bg-green-500/20 text-green-400" : "bg-green-100 text-green-700"
+                                : hitRate >= 25
+                                ? isDark ? "bg-yellow-500/20 text-yellow-400" : "bg-yellow-100 text-yellow-700"
+                                : isDark ? "bg-white/8 text-white/50" : "bg-slate-100 text-slate-500"
+                            }`}>
+                              {hitCount} hit / {newDrawsSeen} ({hitRate}%)
+                            </span>
+                          )}
+                          {hitCount > 0 && hitRate === null && (
                             <span className={`text-xs font-black px-2.5 py-1 rounded-full ${isDark ? "bg-green-500/20 text-green-400" : "bg-green-100 text-green-700"}`}>
                               {hitCount} HIT ✓
                             </span>
+                          )}
+                          {/* Update accuracy button */}
+                          {hasWatermark && (
+                            <button
+                              onClick={() => updateAccuracy(entry.id)}
+                              title="Perbarui akurasi dengan draw terbaru"
+                              className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-xl font-bold transition-all ${isDark ? "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25" : "bg-blue-50 text-blue-600 hover:bg-blue-100"}`}>
+                              <Target className="w-3 h-3" />
+                              Update
+                            </button>
                           )}
                           <button onClick={() => deleteHistory(entry.id)}
                             className={`p-1.5 rounded-lg ${isDark ? "bg-white/5 hover:bg-red-500/15 text-white/30 hover:text-red-400" : "bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-400"}`}>
@@ -422,8 +506,10 @@ export default function TwoDBelakangPage({ resultData, isDark }: Props) {
                           </button>
                         </div>
                       </div>
+
+                      {/* Live numbers grid (colored by hit) */}
                       <div className="flex flex-wrap gap-1">
-                        {entry.live.slice(0, 30).map(num => {
+                        {entry.live.slice(0, 35).map(num => {
                           const isHit = entry.hits.includes(num);
                           return (
                             <span key={num} className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-black ${
@@ -433,15 +519,22 @@ export default function TwoDBelakangPage({ resultData, isDark }: Props) {
                             }`}>{num}</span>
                           );
                         })}
-                        {entry.live.length > 30 && (
+                        {entry.live.length > 35 && (
                           <span className={`inline-flex items-center justify-center px-2 h-8 rounded-lg text-[10px] font-bold ${muted}`}>
-                            +{entry.live.length - 30} lagi
+                            +{entry.live.length - 35} lagi
                           </span>
                         )}
                       </div>
+
+                      {/* Hit detail */}
                       {hitCount > 0 && (
                         <div className={`text-xs px-3 py-2 rounded-xl ${isDark ? "bg-green-500/10 text-green-400" : "bg-green-50 text-green-700"}`}>
-                          🎯 Hit: {entry.hits.join(", ")} muncul di draw berikutnya
+                          🎯 Hit: <span className="font-black">{entry.hits.join(", ")}</span> muncul di draw setelah analisa
+                        </div>
+                      )}
+                      {newDrawsSeen === 0 && hasWatermark && (
+                        <div className={`text-xs px-3 py-2 rounded-xl ${isDark ? "bg-white/5 text-white/30" : "bg-slate-50 text-slate-400"}`}>
+                          Belum ada draw baru sejak analisa disimpan. Klik "Update" setelah draw keluar.
                         </div>
                       )}
                     </div>

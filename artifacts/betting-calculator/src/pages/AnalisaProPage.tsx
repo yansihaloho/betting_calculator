@@ -8,6 +8,15 @@ import { toast } from "sonner";
 type ResultRow = { hari: string; tanggal: string; [slot: string]: string };
 const TIME_SLOTS = ["00:01", "13:00", "16:00", "19:00", "22:00", "23:00"];
 const TIME_SLOTS_DESC = [...TIME_SLOTS].reverse();
+const SLOT_NAMES: Record<string, string> = {
+  "semua":  "Semua Slot",
+  "00:01":  "Dini Hari",
+  "13:00":  "Siang",
+  "16:00":  "Sore",
+  "19:00":  "Malam",
+  "22:00":  "Larut",
+  "23:00":  "Tengah Malam",
+};
 
 function extractAllDraws(resultData: ResultRow[]): string[] {
   const draws: string[] = [];
@@ -20,6 +29,15 @@ function extractAllDraws(resultData: ResultRow[]): string[] {
   return draws;
 }
 
+function extractSlotDraws(resultData: ResultRow[], slot: string): string[] {
+  const draws: string[] = [];
+  for (const row of resultData) {
+    const v = String(row[slot] || "");
+    if (/^\d{4}$/.test(v)) draws.push(v);
+  }
+  return draws;
+}
+
 function copyText(t: string) {
   try { navigator.clipboard.writeText(t); return true; } catch { return false; }
 }
@@ -28,6 +46,7 @@ interface Props { resultData: ResultRow[]; isDark: boolean }
 
 export default function AnalisaProPage({ resultData, isDark }: Props) {
   const [n, setN] = useState(30);
+  const [activeSlot, setActiveSlot] = useState("semua");
   const [openSection, setOpenSection] = useState<string>("freq");
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -38,7 +57,11 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
   const sub = isDark ? "bg-white/5" : "bg-slate-50";
 
   const allDraws = useMemo(() => extractAllDraws(resultData), [resultData]);
-  const draws = useMemo(() => allDraws.slice(0, n), [allDraws, n]);
+  const slotDraws = useMemo(
+    () => activeSlot === "semua" ? allDraws : extractSlotDraws(resultData, activeSlot),
+    [allDraws, resultData, activeSlot]
+  );
+  const draws = useMemo(() => slotDraws.slice(0, n), [slotDraws, n]);
 
   function doCopy(text: string, key: string) {
     if (copyText(text)) {
@@ -342,9 +365,12 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl md:text-2xl font-black">Analisa Pro AI</h1>
-            <p className="opacity-70 text-xs mt-0.5">12-Step Analisis Statistik Mendalam — {draws.length} draw terakhir</p>
+            <p className="opacity-70 text-xs mt-0.5">
+              12-Step Analisis Statistik — {draws.length} draw
+              {activeSlot !== "semua" && <span className="ml-1 font-black">· Slot {activeSlot}</span>}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs opacity-70">Gunakan</span>
             {[18, 30, 42].map(v => (
               <button key={v} onClick={() => setN(v)}
@@ -354,6 +380,25 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
             ))}
             <span className="text-xs opacity-70">draw</span>
           </div>
+        </div>
+        {/* Slot selector */}
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {["semua", ...TIME_SLOTS].map(slot => (
+            <button
+              key={slot}
+              onClick={() => setActiveSlot(slot)}
+              className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition-all ${
+                activeSlot === slot
+                  ? "bg-white text-purple-700 shadow-sm"
+                  : "bg-white/15 hover:bg-white/25"
+              }`}
+            >
+              {slot === "semua" ? "Semua" : slot}
+              {slot !== "semua" && (
+                <span className="ml-1 opacity-70 font-normal">{SLOT_NAMES[slot]?.split(" ")[0]}</span>
+              )}
+            </button>
+          ))}
         </div>
         {/* Quick summary pills */}
         <div className="flex flex-wrap gap-2 mt-3">
