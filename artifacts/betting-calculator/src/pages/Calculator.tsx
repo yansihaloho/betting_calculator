@@ -1508,7 +1508,7 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
 
       {/* ── Header ── */}
       <div className={`sticky top-0 z-40 backdrop-blur-2xl border-b ${isDark ? "border-white/10 bg-black/40" : "border-slate-200 bg-white/80"}`}>
-        <div className="max-w-7xl mx-auto px-3 py-3 flex items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-2 sm:px-3 py-2 sm:py-3 flex items-center justify-between gap-1.5 sm:gap-2">
           {/* Hamburger toggle */}
           <button
             onClick={() => setSidebarOpen(v => !v)}
@@ -1524,9 +1524,9 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
               const PAGE_META: Record<string,{label:string;color:string}> = {
                 cerdas:{label:"Smart AI",color:"#8b5cf6"}, kalkulator:{label:"Kalkulator",color:"#10b981"},
                 laporan:{label:"Laporan",color:"#f97316"}, result:{label:"Result",color:"#f59e0b"},
-                prediksi:{label:"Prediksi",color:"#3b82f6"}, prediksi2:{label:"Smart AI V2",color:"#7c3aed"},
-                prediksi3:{label:"Prediksi 3",color:"#ec4899"}, berantai:{label:"Berantai",color:"#06b6d4"},
-                analisis:{label:"Analisis",color:"#ef4444"}, analisis2:{label:"Analisis 2",color:"#6366f1"},
+                prediksi:{label:"Prediksi",color:"#3b82f6"}, prediksi2:{label:"Konsensus AI",color:"#7c3aed"},
+                prediksi3:{label:"Prediksi Plus",color:"#ec4899"}, berantai:{label:"Berantai",color:"#06b6d4"},
+                analisis:{label:"Hot/Cold",color:"#ef4444"}, analisis2:{label:"Pola Lanjutan",color:"#6366f1"},
                 rumus:{label:"Rumus",color:"#14b8a6"}, kalender:{label:"Kalender",color:"#84cc16"},
                 statistik:{label:"Statistik",color:"#f59e0b"}, saldo:{label:"Saldo",color:"#eab308"},
                 live:{label:"🔴 LIVE",color:"#ef4444"},
@@ -1534,31 +1534,35 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
                 akurasi:{label:"Akurasi",color:"#f97316"},
                 analisapro:{label:"Analisa Pro",color:"#7c3aed"},
                 "2dbelakang":{label:"2D Belakang",color:"#e11d48"},
+                "2ddepan":{label:"2D Depan",color:"#3b82f6"},
+                "2dtengah":{label:"2D Tengah",color:"#8b5cf6"},
+                shio:{label:"Shio",color:"#f59e0b"},
+                "3d":{label:"3D Belakang",color:"#14b8a6"},
               };
               const pm = PAGE_META[menu];
               return (
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h1 className="text-base md:text-lg font-black tracking-tight bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent leading-tight">
-                      STRATEGI DASHBOARD
-                    </h1>
-                    {pm && (
-                      <span className="hidden sm:flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-full"
-                        style={{ background: pm.color + "22", color: pm.color, border: `1px solid ${pm.color}40` }}>
-                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: pm.color }} />
-                        {pm.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {pm && <span className="sm:hidden text-xs font-bold" style={{ color: pm.color }}>{pm.label}</span>}
-                    <button onClick={() => setShowGithub(true)}
-                      className={`flex items-center gap-1 text-xs font-bold transition-colors ${syncUi.color} hover:opacity-80`}
-                      title={syncUi.label}>
-                      {syncUi.icon}
-                      <span className="hidden md:inline">{syncUi.label}</span>
-                    </button>
-                  </div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {/* Mobile: show only current page name */}
+                  <h1 className="sm:hidden text-sm font-black tracking-tight bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent leading-tight truncate">
+                    {pm ? pm.label : "4D Macau"}
+                  </h1>
+                  {/* Desktop: show full app name + page badge */}
+                  <h1 className="hidden sm:block text-base md:text-lg font-black tracking-tight bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent leading-tight whitespace-nowrap">
+                    STRATEGI
+                  </h1>
+                  {pm && (
+                    <span className="hidden sm:flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-full flex-shrink-0"
+                      style={{ background: pm.color + "22", color: pm.color, border: `1px solid ${pm.color}40` }}>
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: pm.color }} />
+                      {pm.label}
+                    </span>
+                  )}
+                  <button onClick={() => setShowGithub(true)}
+                    className={`flex items-center gap-1 text-xs font-bold transition-colors flex-shrink-0 ${syncUi.color} hover:opacity-80`}
+                    title={syncUi.label}>
+                    {syncUi.icon}
+                    <span className="hidden md:inline">{syncUi.label}</span>
+                  </button>
                 </div>
               );
             })()}
@@ -1619,9 +1623,9 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
               {slotNotifEnabled && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full"/>}
             </button>
 
-            {/* Notif */}
+            {/* Notif — hidden on smallest screens if no unread */}
             <button onClick={() => { setShowNotif(true); setShowProfile(false); setShowGuide(false); setShowGithub(false); }}
-              className={`relative p-2 rounded-xl transition-all ${isDark ? "bg-white/10 hover:bg-white/15 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}>
+              className={`relative p-2 rounded-xl transition-all ${unreadCount === 0 ? "hidden sm:flex" : "flex"} ${isDark ? "bg-white/10 hover:bg-white/15 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}>
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center">{unreadCount > 9 ? "9+" : unreadCount}</span>}
             </button>
@@ -1629,16 +1633,16 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
             {/* Profile — visible on all screen sizes */}
             <button onClick={() => { setShowProfile(true); setShowNotif(false); setShowGuide(false); setShowGithub(false); }}
               title={userProfile ? `${userProfile.name}\n${userProfile.email}` : "Profil"}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded-xl transition-all hover:scale-105 active:scale-95 ${isDark ? "bg-white/10 hover:bg-white/15" : "bg-slate-100 hover:bg-slate-200"}`}>
+              className={`flex items-center gap-2 p-1.5 rounded-xl transition-all hover:scale-105 active:scale-95 ${isDark ? "bg-white/10 hover:bg-white/15" : "bg-slate-100 hover:bg-slate-200"}`}>
               {userProfile?.imageUrl ? (
-                <img src={userProfile.imageUrl} alt={userProfile.name} className="w-6 h-6 rounded-full object-cover ring-2 ring-blue-400/50" />
+                <img src={userProfile.imageUrl} alt={userProfile.name} className="w-7 h-7 rounded-full object-cover ring-2 ring-blue-400/50" />
               ) : (
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-blue-400 to-purple-500 text-white`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br from-blue-400 to-purple-500 text-white`}>
                   {userProfile?.name?.[0]?.toUpperCase() ?? <User className="w-3 h-3" />}
                 </div>
               )}
               {userProfile && (
-                <span className={`text-xs font-medium max-w-[80px] truncate ${isDark ? "text-white/90" : "text-slate-700"}`}>
+                <span className={`hidden sm:block text-xs font-medium max-w-[80px] truncate ${isDark ? "text-white/90" : "text-slate-700"}`}>
                   {userProfile.name.split(" ")[0]}
                 </span>
               )}
@@ -1700,18 +1704,18 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
         {menu === "kalkulator" && (
           <div className="animate-slide-up space-y-4">
             {/* Action buttons — kalkulator only */}
-            <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
               {([
-                { fn: undoLast,     icon:<Undo2 className="w-3 h-3"/>,     label:"Undo",     cls: undoStack.length > 0 ? "bg-indigo-600 text-white" : "bg-indigo-600/25 text-indigo-400 opacity-50 cursor-not-allowed", disabled: undoStack.length === 0 },
-                { fn: copyStrategi, icon:<Copy className="w-3 h-3"/>,       label:"Copy",     cls:"bg-green-600 text-white" },
-                { fn: exportCSV,    icon:<Download className="w-3 h-3"/>,   label:"CSV",      cls:"bg-purple-600 text-white" },
-                { fn: exportJSON,   icon:<Download className="w-3 h-3"/>,   label:"Backup",   cls:"bg-cyan-700 text-white" },
-                { fn: importJSON,   icon:<Upload className="w-3 h-3"/>,     label:"Import",   cls:"bg-cyan-600 text-white" },
-                { fn: resetSesi,    icon:<RotateCcw className="w-3 h-3"/>,  label:"Sesi Baru",cls:"bg-orange-600 text-white" },
-                { fn: hapusHistori, icon:<Trash2 className="w-3 h-3"/>,     label:"Hapus",    cls:"bg-red-600 text-white" },
+                { fn: undoLast,     icon:<Undo2 className="w-3.5 h-3.5"/>,    label:"Undo",     cls: undoStack.length > 0 ? "bg-indigo-600 text-white" : "bg-indigo-600/25 text-indigo-400 opacity-50 cursor-not-allowed", disabled: undoStack.length === 0 },
+                { fn: copyStrategi, icon:<Copy className="w-3.5 h-3.5"/>,      label:"Copy",     cls:"bg-green-600 text-white" },
+                { fn: exportCSV,    icon:<Download className="w-3.5 h-3.5"/>,  label:"CSV",      cls:"bg-purple-600 text-white" },
+                { fn: exportJSON,   icon:<Download className="w-3.5 h-3.5"/>,  label:"Backup",   cls:"bg-cyan-700 text-white" },
+                { fn: importJSON,   icon:<Upload className="w-3.5 h-3.5"/>,    label:"Import",   cls:"bg-cyan-600 text-white" },
+                { fn: resetSesi,    icon:<RotateCcw className="w-3.5 h-3.5"/>, label:"Sesi Baru",cls:"bg-orange-600 text-white" },
+                { fn: hapusHistori, icon:<Trash2 className="w-3.5 h-3.5"/>,    label:"Hapus",    cls:"bg-red-600 text-white" },
               ] as { fn:()=>void; icon:React.ReactNode; label:string; cls:string; disabled?:boolean }[]).map(b => (
                 <button key={b.label} onClick={b.fn} disabled={b.disabled} title={b.label}
-                  className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:scale-105 active:scale-95 ${b.cls}`}>
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95 ${b.cls}`}>
                   {b.icon}<span>{b.label}</span>
                 </button>
               ))}
@@ -1815,25 +1819,25 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
             {/* Putaran area */}
             <div className="xl:col-span-3 space-y-3">
               {/* Stats row */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                 {[
                   { label:"Saldo", val:`Rp ${formatRupiah(saldo)}`, cls:"bg-gradient-to-br from-green-600 to-emerald-700 text-white" },
                   { label:"Total Profit", val:`Rp ${formatRupiah(totalProfit)}`, cls: cardCls, valCls:"text-green-400" },
                   { label:"Winrate", val:`${winrate}%`, cls: cardCls, valCls:"text-yellow-400" },
                   { label:"Total Sesi", val:`${histori.length}`, cls: cardCls, valCls:"text-blue-400" },
                 ].map((s, i) => (
-                  <div key={i} className={`p-4 ${i===0 ? "rounded-[20px] " + s.cls : s.cls}`}>
-                    <div className={`text-xs font-bold ${i===0 ? "text-white/70" : isDark ? "opacity-60" : "text-slate-500"}`}>{s.label}</div>
-                    <div className={`text-xl font-black mt-1 ${s.valCls || ""}`}>{s.val}</div>
+                  <div key={i} className={`p-3 sm:p-4 ${i===0 ? "rounded-[20px] " + s.cls : s.cls}`}>
+                    <div className={`text-[11px] sm:text-xs font-bold ${i===0 ? "text-white/70" : isDark ? "opacity-60" : "text-slate-500"}`}>{s.label}</div>
+                    <div className={`text-lg sm:text-xl font-black mt-0.5 sm:mt-1 ${s.valCls || ""}`}>{s.val}</div>
                   </div>
                 ))}
               </div>
               {/* Active banner */}
-              <div className="rounded-[20px] bg-gradient-to-r from-slate-900 via-blue-950 to-cyan-900 text-white p-4 shadow-xl">
-                <div className="flex flex-wrap items-center gap-4 justify-between">
-                  <div><div className="text-xs opacity-60">Putaran Aktif</div><div className="text-3xl font-black">{putaranAktif}</div></div>
-                  <div><div className="text-xs opacity-60">Target Profit</div><div className="text-2xl font-black">Rp {formatRupiah(targetProfit)}</div></div>
-                  <div><div className="text-xs opacity-60">Status</div><div className={`text-lg font-black ${sesiSelesai ? "text-green-400" : "text-yellow-400"}`}>{sesiSelesai ? "SELESAI" : "AKTIF"}</div></div>
+              <div className="rounded-[20px] bg-gradient-to-r from-slate-900 via-blue-950 to-cyan-900 text-white p-3 sm:p-4 shadow-xl">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                  <div><div className="text-[10px] sm:text-xs opacity-60">Putaran Aktif</div><div className="text-2xl sm:text-3xl font-black">{putaranAktif}</div></div>
+                  <div><div className="text-[10px] sm:text-xs opacity-60">Target Profit</div><div className="text-base sm:text-2xl font-black leading-tight">Rp {formatRupiah(targetProfit)}</div></div>
+                  <div><div className="text-[10px] sm:text-xs opacity-60">Status</div><div className={`text-base sm:text-lg font-black ${sesiSelesai ? "text-green-400" : "text-yellow-400"}`}>{sesiSelesai ? "SELESAI" : "AKTIF"}</div></div>
                 </div>
               </div>
               {/* Putaran cards */}
@@ -1842,20 +1846,20 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
                 const isActive = !sesiSelesai && putaranAktif === item.putaran;
                 return (
                   <div key={item.putaran} className={`rounded-[20px] border p-4 transition-all duration-300 ${isActive ? "border-blue-500/50 bg-gradient-to-r from-blue-600/15 to-cyan-600/10 shadow-[0_0_25px_rgba(59,130,246,0.18)]" : disabled ? `${isDark ? "border-white/5 bg-white/3 opacity-25" : "border-slate-100 bg-slate-50 opacity-30"}` : cardCls}`}>
-                    <div className="flex flex-wrap justify-between gap-3">
-                      <div>
+                    <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-between gap-2 sm:gap-3">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <h2 className="text-lg font-black">Putaran {item.putaran}</h2>
+                          <h2 className="text-base sm:text-lg font-black">Putaran {item.putaran}</h2>
                           {isActive && <span className="px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-bold border border-blue-500/30">AKTIF</span>}
                         </div>
                         <div className={`space-y-0.5 text-sm ${isDark ? "text-white/70" : "text-slate-600"}`}>
                           <div>Bet/No: <span className={`font-bold ${isActive ? (isDark ? "text-white" : "text-slate-900") : ""}`}>Rp {formatRupiah(item.taruhan)}</span></div>
-                          <div>Modal: <b>Rp {formatRupiah(item.modal)}</b> | Akum: <b>Rp {formatRupiah(item.akumulasi)}</b></div>
+                          <div className="text-xs sm:text-sm">Modal: <b>Rp {formatRupiah(item.modal)}</b> | Akum: <b>Rp {formatRupiah(item.akumulasi)}</b></div>
                           <div className="text-green-400 font-black">Profit: Rp {formatRupiah(item.profit)}</div>
                         </div>
                       </div>
                       {!disabled && (
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="w-full sm:w-auto flex flex-col gap-2 mt-2 sm:mt-0">
                           {processing && isActive && (
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-yellow-500/20 border border-yellow-500/40 text-yellow-400 text-xs font-bold animate-pulse">
                               <Loader2 className="w-3.5 h-3.5 animate-spin"/>
@@ -1863,8 +1867,8 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
                             </div>
                           )}
                           <div className="flex items-center gap-2">
-                            <button onClick={() => setShowConfirm({ item, type:"menang" })} disabled={processing} className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-black shadow-lg hover:scale-105 active:scale-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed">✓ MENANG</button>
-                            <button onClick={() => setShowConfirm({ item, type:"kalah" })} disabled={processing} className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-red-500 to-rose-600 text-white font-black shadow-lg hover:scale-105 active:scale-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed">✗ KALAH</button>
+                            <button onClick={() => setShowConfirm({ item, type:"menang" })} disabled={processing} className="flex-1 sm:flex-none px-5 py-3 sm:py-2.5 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-black shadow-lg hover:scale-105 active:scale-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed">✓ MENANG</button>
+                            <button onClick={() => setShowConfirm({ item, type:"kalah" })} disabled={processing} className="flex-1 sm:flex-none px-5 py-3 sm:py-2.5 rounded-2xl bg-gradient-to-r from-red-500 to-rose-600 text-white font-black shadow-lg hover:scale-105 active:scale-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed">✗ KALAH</button>
                           </div>
                         </div>
                       )}

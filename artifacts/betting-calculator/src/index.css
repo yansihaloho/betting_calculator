@@ -144,9 +144,9 @@
 .pr-safe {
   padding-right: env(safe-area-inset-right, 0px);
 }
-/* Combines bottom-nav height (64px) + safe area for content padding */
+/* Combines bottom-nav height (72px) + safe area for content padding */
 .pb-nav-safe {
-  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 .safe-area-bottom {
