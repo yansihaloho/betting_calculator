@@ -3,7 +3,8 @@ import { lotteryResultsTable } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 
-export const RESULT_START_DATE = "2026-01-01";
+// Dynamic: always start from Jan 1 of the current year so no manual update needed each year
+export const RESULT_START_DATE = `${new Date().getFullYear()}-01-01`;
 
 export const TIME_SLOTS = ["00:01","13:00","16:00","19:00","22:00","23:00"];
 
@@ -58,14 +59,18 @@ function parseMasterliveHTML(html: string): ParsedDraw[] {
   return results;
 }
 
-const FETCH_URLS = [
-  "https://masterlive.net/data-totomacau-lengkap-2026.php",
-  "https://masterlive.net/data-totomacau-2026.php",
-  "https://masterlive.net/totomacau.php",
-];
+// URLs are built dynamically so the scraper keeps working after a year rollover
+function getFetchUrls(): string[] {
+  const yr = new Date().getFullYear();
+  return [
+    `https://masterlive.net/data-totomacau-lengkap-${yr}.php`,
+    `https://masterlive.net/data-totomacau-${yr}.php`,
+    "https://masterlive.net/totomacau.php",
+  ];
+}
 
 async function fetchHtmlFromMasterlive(): Promise<string | null> {
-  for (const url of FETCH_URLS) {
+  for (const url of getFetchUrls()) {
     try {
       const res = await fetch(url, {
         headers: {
