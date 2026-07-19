@@ -16,6 +16,8 @@ const SYNC_KEYS = [
   "saldo_tx",          // SaldoPage transaction history
   "smartai_evals",     // SmartPredictionV2 evaluation history (predicted vs actual)
   "2d_belakang_history", // TwoDBelakangPage riwayat kill/live analysis
+  "2d_depan_history",   // TwoDDepanPage riwayat
+  "2d_tengah_history",  // TwoDTengahPage riwayat
 ];
 
 function readAll(): Record<string, string> {

@@ -428,6 +428,14 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
                 Bandingkan Slot
               </button>
             </div>
+            {/* PDF Print */}
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-black transition-all"
+              title="Cetak / Simpan PDF"
+            >
+              🖨 PDF
+            </button>
             <span className="text-xs opacity-70">|</span>
             <span className="text-xs opacity-70">Draw:</span>
             {[18, 30, 42].map(v => (

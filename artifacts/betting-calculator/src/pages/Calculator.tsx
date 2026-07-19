@@ -11,6 +11,10 @@ import SmartPrediction from "./SmartPrediction";
 import SmartPredictionV2 from "./SmartPredictionV2";
 import AnalisaProPage from "./AnalisaProPage";
 import TwoDBelakangPage from "./TwoDBelakangPage";
+import TwoDDepanPage from "./TwoDDepanPage";
+import TwoDTengahPage from "./TwoDTengahPage";
+import ShioPage from "./ShioPage";
+import ThreeDPage from "./ThreeDPage";
 import Kalender from "./Kalender";
 import RumusPage from "./RumusPage";
 import Logo from "@/components/Logo";
@@ -105,7 +109,7 @@ function isNomorMenang(angka: string, nomorList: string): boolean {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "saldo" | "prediksi" | "prediksi2" | "prediksi3" | "berantai" | "analisis" | "analisis2" | "live" | "kalender" | "rumus" | "cerdas" | "kelly" | "akurasi" | "analisapro" | "2dbelakang";
+type MenuItem = "kalkulator" | "laporan" | "result" | "statistik" | "saldo" | "prediksi" | "prediksi2" | "prediksi3" | "berantai" | "analisis" | "analisis2" | "live" | "kalender" | "rumus" | "cerdas" | "kelly" | "akurasi" | "analisapro" | "2dbelakang" | "2ddepan" | "2dtengah" | "shio" | "3d";
 interface PutaranData { putaran:number; taruhan:number; modal:number; akumulasi:number; hadiah:number; profit:number; }
 type SyncStatus = "idle" | "loading" | "saving" | "synced" | "error" | "offline";
 type ResultSource = "live" | "lokal" | "loading";
@@ -1395,51 +1399,87 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
           </button>
         </div>
 
-        {/* Menu items */}
-        <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        {/* Menu items — grouped */}
+        <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-3">
           {([
-            { id:"cerdas",     icon:<Brain className="w-3.5 h-3.5"/>    , label:"Smart AI",   grad:"from-violet-500 to-purple-600",  shadow:"shadow-violet-500/40" },
-            { id:"kalkulator", icon:<Target className="w-3.5 h-3.5"/>   , label:"Kalkulator", grad:"from-emerald-400 to-green-600",  shadow:"shadow-emerald-500/40" },
-            { id:"laporan",    icon:<FileText className="w-3.5 h-3.5"/> , label:"Laporan",    grad:"from-orange-400 to-orange-600",  shadow:"shadow-orange-500/40" },
-            { id:"result",     icon:<Award className="w-3.5 h-3.5"/>    , label:"Result",     grad:"from-yellow-400 to-amber-500",   shadow:"shadow-yellow-500/40" },
-            { id:"prediksi",   icon:<Brain className="w-3.5 h-3.5"/>    , label:"Prediksi",   grad:"from-blue-500 to-blue-700",      shadow:"shadow-blue-500/40" },
-            { id:"prediksi2",  icon:<Cpu className="w-3.5 h-3.5"/>      , label:"Smart AI V2", grad:"from-purple-500 to-indigo-600",  shadow:"shadow-purple-500/40" },
-            { id:"prediksi3",  icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Prediksi 3", grad:"from-pink-500 to-rose-600",      shadow:"shadow-pink-500/40" },
-            { id:"berantai",   icon:<Hash className="w-3.5 h-3.5"/>     , label:"Berantai",   grad:"from-cyan-400 to-teal-600",      shadow:"shadow-cyan-500/40" },
-            { id:"analisis",   icon:<Flame className="w-3.5 h-3.5"/>    , label:"Analisis",   grad:"from-red-500 to-rose-600",       shadow:"shadow-red-500/40" },
-            { id:"analisis2",  icon:<Layers className="w-3.5 h-3.5"/>   , label:"Analisis 2", grad:"from-indigo-500 to-violet-600",  shadow:"shadow-indigo-500/40" },
-            { id:"rumus",      icon:<BookOpen className="w-3.5 h-3.5"/> , label:"Rumus",      grad:"from-teal-400 to-cyan-600",      shadow:"shadow-teal-500/40" },
-            { id:"kalender",   icon:<CalendarDays className="w-3.5 h-3.5"/>, label:"Kalender", grad:"from-lime-400 to-green-500",   shadow:"shadow-lime-500/40" },
-            { id:"statistik",  icon:<TrendingUp className="w-3.5 h-3.5"/>, label:"Statistik", grad:"from-amber-400 to-orange-500",  shadow:"shadow-amber-500/40" },
-            { id:"saldo",      icon:<Banknote className="w-3.5 h-3.5"/> , label:"Saldo",      grad:"from-yellow-500 to-yellow-600",  shadow:"shadow-yellow-600/40" },
-            { id:"live",       icon:<Tv className="w-3.5 h-3.5"/>       , label:"LIVE",       grad:"from-red-500 to-pink-600",       shadow:"shadow-red-500/40" },
-            { id:"kelly",      icon:<Shield className="w-3.5 h-3.5"/>   , label:"Kelly",      grad:"from-violet-500 to-purple-600",  shadow:"shadow-violet-500/40" },
-            { id:"akurasi",    icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Akurasi",    grad:"from-orange-400 to-rose-500",    shadow:"shadow-orange-500/40" },
-            { id:"analisapro", icon:<Sparkles className="w-3.5 h-3.5"/>, label:"Analisa Pro", grad:"from-violet-500 to-purple-700",   shadow:"shadow-violet-500/40" },
-            { id:"2dbelakang", icon:<Hash className="w-3.5 h-3.5"/>     , label:"2D Belakang", grad:"from-rose-500 to-red-700",        shadow:"shadow-rose-500/40" },
-          ] as { id: MenuItem; icon: React.ReactNode; label: string; grad: string; shadow: string }[]).map(item => (
-            <button
-              key={item.id}
-              onClick={() => { setMenu(item.id); if (window.innerWidth < 768) setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-all text-left group ${
-                menu === item.id
-                  ? isDark
-                    ? "bg-white/10 text-white"
-                    : "bg-slate-100 text-slate-900"
-                  : isDark
-                    ? "text-white/65 hover:bg-white/6 hover:text-white"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
-              }`}
-            >
-              <span className={`w-7 h-7 rounded-[9px] flex items-center justify-center flex-shrink-0 text-white bg-gradient-to-br ${item.grad} shadow-sm ${menu === item.id ? `shadow-md ${item.shadow}` : "opacity-85 group-hover:opacity-100"} transition-all`}>
-                {item.icon}
-              </span>
-              <span className="flex-1 text-[13px]">{item.label}</span>
-              {item.id === "live" && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
-              {item.id === "cerdas" && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? "bg-violet-500/25 text-violet-300" : "bg-violet-100 text-violet-600"}`}>AI</span>}
-              {item.id === "prediksi2" && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? "bg-indigo-500/30 text-indigo-300" : "bg-indigo-100 text-indigo-600"}`}>V2</span>}
-              {menu === item.id && <ChevronRight className="w-3 h-3 opacity-40 flex-shrink-0" />}
-            </button>
+            {
+              group: "UTAMA",
+              items: [
+                { id:"kalkulator", icon:<Target className="w-3.5 h-3.5"/>    , label:"Kalkulator",    grad:"from-emerald-400 to-green-600",   shadow:"shadow-emerald-500/40" },
+                { id:"result",     icon:<Award className="w-3.5 h-3.5"/>     , label:"Result Live",   grad:"from-yellow-400 to-amber-500",    shadow:"shadow-yellow-500/40" },
+                { id:"laporan",    icon:<FileText className="w-3.5 h-3.5"/>  , label:"Laporan",       grad:"from-orange-400 to-orange-600",   shadow:"shadow-orange-500/40" },
+                { id:"statistik",  icon:<TrendingUp className="w-3.5 h-3.5"/>, label:"Statistik",    grad:"from-amber-400 to-orange-500",    shadow:"shadow-amber-500/40" },
+              ],
+            },
+            {
+              group: "PREDIKSI",
+              items: [
+                { id:"cerdas",     icon:<Brain className="w-3.5 h-3.5"/>    , label:"Smart AI",      grad:"from-violet-500 to-purple-600",   shadow:"shadow-violet-500/40", badge:"AI" },
+                { id:"prediksi2",  icon:<Cpu className="w-3.5 h-3.5"/>      , label:"Konsensus AI",  grad:"from-purple-500 to-indigo-600",   shadow:"shadow-purple-500/40", badge:"V2" },
+                { id:"prediksi",   icon:<Brain className="w-3.5 h-3.5"/>    , label:"Prediksi",      grad:"from-blue-500 to-blue-700",       shadow:"shadow-blue-500/40" },
+                { id:"prediksi3",  icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Prediksi Plus", grad:"from-pink-500 to-rose-600",       shadow:"shadow-pink-500/40" },
+                { id:"berantai",   icon:<Hash className="w-3.5 h-3.5"/>     , label:"Prediksi Berantai", grad:"from-cyan-400 to-teal-600",  shadow:"shadow-cyan-500/40" },
+                { id:"analisapro", icon:<Sparkles className="w-3.5 h-3.5"/>, label:"Analisa Pro AI", grad:"from-violet-500 to-purple-700",   shadow:"shadow-violet-500/40" },
+                { id:"akurasi",    icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"Akurasi Mesin", grad:"from-orange-400 to-rose-500",    shadow:"shadow-orange-500/40" },
+              ],
+            },
+            {
+              group: "ANALISIS DIGIT",
+              items: [
+                { id:"analisis",   icon:<Flame className="w-3.5 h-3.5"/>    , label:"Hot/Cold Digit", grad:"from-red-500 to-rose-600",      shadow:"shadow-red-500/40" },
+                { id:"analisis2",  icon:<Layers className="w-3.5 h-3.5"/>   , label:"Pola Lanjutan",  grad:"from-indigo-500 to-violet-600", shadow:"shadow-indigo-500/40" },
+              ],
+            },
+            {
+              group: "2D & 3D TOOLS",
+              items: [
+                { id:"2ddepan",    icon:<Hash className="w-3.5 h-3.5"/>     , label:"2D Depan",      grad:"from-blue-500 to-cyan-600",       shadow:"shadow-blue-500/40" },
+                { id:"2dtengah",   icon:<Hash className="w-3.5 h-3.5"/>     , label:"2D Tengah",     grad:"from-purple-500 to-violet-600",   shadow:"shadow-purple-500/40" },
+                { id:"2dbelakang", icon:<Hash className="w-3.5 h-3.5"/>     , label:"2D Belakang",   grad:"from-rose-500 to-red-700",        shadow:"shadow-rose-500/40" },
+                { id:"3d",         icon:<BarChart2 className="w-3.5 h-3.5"/>, label:"3D Belakang",   grad:"from-teal-500 to-cyan-600",       shadow:"shadow-teal-500/40" },
+                { id:"shio",       icon:<Sparkles className="w-3.5 h-3.5"/>, label:"Analisis Shio",  grad:"from-amber-500 to-orange-600",   shadow:"shadow-amber-500/40" },
+              ],
+            },
+            {
+              group: "KEUANGAN",
+              items: [
+                { id:"saldo",      icon:<Banknote className="w-3.5 h-3.5"/> , label:"Saldo",         grad:"from-yellow-500 to-yellow-600",  shadow:"shadow-yellow-600/40" },
+                { id:"kelly",      icon:<Shield className="w-3.5 h-3.5"/>   , label:"Kelly Criterion", grad:"from-violet-500 to-purple-600", shadow:"shadow-violet-500/40" },
+              ],
+            },
+            {
+              group: "LAINNYA",
+              items: [
+                { id:"live",       icon:<Tv className="w-3.5 h-3.5"/>       , label:"LIVE Stream",   grad:"from-red-500 to-pink-600",       shadow:"shadow-red-500/40", live:true },
+                { id:"kalender",   icon:<CalendarDays className="w-3.5 h-3.5"/>, label:"Kalender",   grad:"from-lime-400 to-green-500",     shadow:"shadow-lime-500/40" },
+                { id:"rumus",      icon:<BookOpen className="w-3.5 h-3.5"/> , label:"Rumus & Cara",  grad:"from-teal-400 to-cyan-600",      shadow:"shadow-teal-500/40" },
+              ],
+            },
+          ] as { group: string; items: { id: MenuItem; icon: React.ReactNode; label: string; grad: string; shadow: string; badge?: string; live?: boolean }[] }[]).map(section => (
+            <div key={section.group}>
+              <div className={`px-3 py-1.5 text-[9px] font-black tracking-widest uppercase ${isDark ? "text-white/25" : "text-slate-400"}`}>{section.group}</div>
+              <div className="space-y-0.5">
+                {section.items.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => { setMenu(item.id); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-all text-left group ${
+                      menu === item.id
+                        ? isDark ? "bg-white/10 text-white" : "bg-slate-100 text-slate-900"
+                        : isDark ? "text-white/65 hover:bg-white/6 hover:text-white" : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                    }`}
+                  >
+                    <span className={`w-7 h-7 rounded-[9px] flex items-center justify-center flex-shrink-0 text-white bg-gradient-to-br ${item.grad} shadow-sm ${menu === item.id ? `shadow-md ${item.shadow}` : "opacity-85 group-hover:opacity-100"} transition-all`}>
+                      {item.icon}
+                    </span>
+                    <span className="flex-1 text-[13px]">{item.label}</span>
+                    {item.live && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                    {item.badge && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? "bg-white/15 text-white/70" : "bg-slate-200 text-slate-500"}`}>{item.badge}</span>}
+                    {menu === item.id && <ChevronRight className="w-3 h-3 opacity-40 flex-shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
@@ -2444,30 +2484,49 @@ export default function Calculator({ theme, toggleTheme, onSignOut, userProfile 
         {menu === "akurasi" && (
           <AkurasiPage resultData={resultData} isDark={isDark} />
         )}
+
+        {/* ══ 2D DEPAN ══ */}
+        {menu === "2ddepan" && (
+          <TwoDDepanPage resultData={resultData} isDark={isDark} />
+        )}
+
+        {/* ══ 2D TENGAH ══ */}
+        {menu === "2dtengah" && (
+          <TwoDTengahPage resultData={resultData} isDark={isDark} />
+        )}
+
+        {/* ══ SHIO ══ */}
+        {menu === "shio" && (
+          <ShioPage resultData={resultData} isDark={isDark} />
+        )}
+
+        {/* ══ 3D BELAKANG ══ */}
+        {menu === "3d" && (
+          <ThreeDPage resultData={resultData} isDark={isDark} />
+        )}
       </div>
 
       {/* ══ MOBILE BOTTOM NAV ══ */}
       <nav className={`md:hidden fixed bottom-0 left-0 right-0 z-50 border-t ${isDark ? "bg-slate-900/95 border-white/10" : "bg-white/95 border-slate-200"} backdrop-blur-xl pb-safe`}>
-        <div className="flex items-center justify-around px-1 py-2">
+        <div className="flex items-center justify-around px-1 py-1.5">
           {([
-            { id:"cerdas",    label:"AI",       grad:"from-violet-500 to-purple-600",   icon:<Layers className="w-5 h-5"/> },
-            { id:"kalkulator",label:"Hitung",   grad:"from-emerald-500 to-green-600",   icon:<CalculatorIcon className="w-5 h-5"/> },
-            { id:"result",    label:"Result",   grad:"from-amber-500 to-yellow-500",    icon:<BarChart2 className="w-5 h-5"/> },
-            { id:"prediksi",  label:"Prediksi", grad:"from-blue-500 to-cyan-500",       icon:<Sparkles className="w-5 h-5"/> },
-            { id:"saldo",     label:"Saldo",    grad:"from-yellow-400 to-amber-500",    icon:<Wallet className="w-5 h-5"/> },
+            { id:"kalkulator", label:"Hitung",   grad:"from-emerald-500 to-green-600",  icon:<CalculatorIcon className="w-5 h-5"/> },
+            { id:"result",     label:"Result",   grad:"from-amber-500 to-yellow-500",   icon:<Award className="w-5 h-5"/> },
+            { id:"cerdas",     label:"Smart AI", grad:"from-violet-500 to-purple-600",  icon:<Brain className="w-5 h-5"/> },
+            { id:"analisapro", label:"Analisa",  grad:"from-violet-500 to-purple-700",  icon:<Sparkles className="w-5 h-5"/> },
+            { id:"2dbelakang", label:"2D",       grad:"from-rose-500 to-red-700",       icon:<Hash className="w-5 h-5"/> },
+            { id:"saldo",      label:"Saldo",    grad:"from-yellow-400 to-amber-500",   icon:<Wallet className="w-5 h-5"/> },
           ] as { id:string; label:string; grad:string; icon:React.ReactNode }[]).map(item => {
             const active = menu === item.id;
             return (
               <button key={item.id} onClick={() => { setMenu(item.id as MenuItem); setSidebarOpen(false); }}
-                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all flex-1">
-                <div className={`w-9 h-9 rounded-2xl flex items-center justify-center transition-all ${
-                  active
-                    ? `bg-gradient-to-br ${item.grad} text-white shadow-lg scale-110`
-                    : isDark ? "text-white/40" : "text-slate-400"
+                className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl transition-all flex-1 min-w-0">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  active ? `bg-gradient-to-br ${item.grad} text-white shadow-lg scale-110` : isDark ? "text-white/40" : "text-slate-400"
                 }`}>
                   {item.icon}
                 </div>
-                <span className={`text-[10px] font-bold transition-colors leading-none ${active ? (isDark ? "text-white" : "text-slate-800") : isDark ? "text-white/40" : "text-slate-400"}`}>
+                <span className={`text-[9px] font-bold transition-colors leading-none truncate ${active ? (isDark ? "text-white" : "text-slate-800") : isDark ? "text-white/40" : "text-slate-400"}`}>
                   {item.label}
                 </span>
               </button>
