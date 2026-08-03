@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, unique, index } from "drizzle-orm/pg-core";
 
 export const userDataTable = pgTable("user_data", {
   id: serial("id").primaryKey(),
@@ -13,7 +13,10 @@ export const lotteryResultsTable = pgTable("lottery_results", {
   slot: text("slot").notNull(),
   number: text("number").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [unique("lottery_results_date_slot").on(t.dateKey, t.slot)]);
+}, (t) => [
+  unique("lottery_results_date_slot").on(t.dateKey, t.slot),
+  index("lottery_results_date_key_idx").on(t.dateKey),
+]);
 
 export type UserData = typeof userDataTable.$inferSelect;
 export type InsertUserData = typeof userDataTable.$inferInsert;

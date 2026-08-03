@@ -19,14 +19,16 @@ const SLOT_NAMES: Record<string, string> = {
 };
 
 function extractAllDraws(resultData: ResultRow[]): string[] {
-  const draws: string[] = [];
-  for (const row of [...resultData].reverse()) {
+  // resultData is newest-first; TIME_SLOTS_DESC is 23:00→00:01
+  // → push order gives newest draw at index 0 (23:00 today before 00:01 today)
+  const out: string[] = [];
+  for (const row of resultData) {
     for (const slot of TIME_SLOTS_DESC) {
       const v = String(row[slot] || "");
-      if (/^\d{4}$/.test(v)) draws.unshift(v);
+      if (/^\d{4}$/.test(v)) out.push(v);
     }
   }
-  return draws;
+  return out;
 }
 
 function extractSlotDraws(resultData: ResultRow[], slot: string): string[] {
@@ -448,12 +450,12 @@ export default function AnalisaProPage({ resultData, isDark }: Props) {
         </div>
         {/* Slot selector — only in analisa view */}
         {view === "analisa" && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
+          <div className="flex gap-1.5 mt-3 overflow-x-auto scrollbar-none pb-0.5">
             {["semua", ...TIME_SLOTS].map(slot => (
               <button
                 key={slot}
                 onClick={() => setActiveSlot(slot)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition-all ${
+                className={`flex-shrink-0 px-2.5 py-1 rounded-xl text-[11px] font-black transition-all ${
                   activeSlot === slot
                     ? "bg-white text-purple-700 shadow-sm"
                     : "bg-white/15 hover:bg-white/25"

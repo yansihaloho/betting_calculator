@@ -280,7 +280,7 @@ export default function ThreeDPage({ resultData, isDark }: Props) {
         <SectionHeader id="recent" title="20 Draw Terakhir (3D)" subtitle="KOP+KEPALA+EKOR" />
         {openSection === "recent" && (
           <div className="px-5 pb-5 flex flex-wrap gap-2">
-            {all3D.slice(0, 20).map((d, i) => (
+            {draws.slice(0, 20).map((d, i) => (
               <div key={i} className="flex flex-col items-center gap-0.5">
                 <span className={`px-2.5 py-2 rounded-xl text-base font-black font-mono ${isDark ? "bg-white/10 text-white" : "bg-slate-100 text-slate-800"}`}>{d.num}</span>
                 <span className={`text-[9px] ${muted}`}>{d.slot}</span>

@@ -228,6 +228,14 @@ export default function TwoDTengahPage({ resultData, isDark }: Props) {
                 })}
               </div>
             </div>
+            {showKilled && (
+              <div>
+                <div className="text-xs font-black mb-2 flex items-center gap-2 text-red-400">ANGKA MATI ({killCount})</div>
+                <div className="grid grid-cols-10 gap-1">
+                  {analysis.killed.map(num => <NumCell key={num} num={num} status="killed" />)}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-5">
@@ -241,6 +249,7 @@ export default function TwoDTengahPage({ resultData, isDark }: Props) {
                     <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-violet-500" style={{ width: `${Math.min((item.freq / (analysis.liveWithStats[0]?.freq || 1)) * 100, 100)}%` }} />
                   </div>
                   <span className={`text-xs font-bold ${muted}`}>{item.freq}×</span>
+                  <span className={`text-xs ${muted}`}>{item.lastPos === 9999 ? "–" : `#${item.lastPos + 1}`}</span>
                 </div>
               ))}
             </div>

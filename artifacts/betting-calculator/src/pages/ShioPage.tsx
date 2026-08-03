@@ -29,15 +29,14 @@ function getShioForNum(n: number): number {
   return (n === 0 ? 100 : n) % 12;
 }
 
-function getShioNumbers(): Record<number, string[]> {
+
+// Pre-computed module-level constant — no need to recompute on every render
+const SHIO_NUMBERS_MAP: Record<number, string[]> = (() => {
   const result: Record<number, string[]> = {};
   SHIO_LIST.forEach(s => (result[s.idx] = []));
-  for (let i = 0; i <= 99; i++) {
-    const shio = getShioForNum(i);
-    result[shio].push(String(i).padStart(2, "0"));
-  }
+  for (let i = 0; i <= 99; i++) result[getShioForNum(i)].push(String(i).padStart(2, "0"));
   return result;
-}
+})();
 
 interface DrawEntry { full: string; ekor: string; shioIdx: number; tanggal: string; slot: string; }
 
@@ -62,7 +61,8 @@ export default function ShioPage({ resultData, isDark }: Props) {
   const [n, setN] = useState(60);
   const [activeShio, setActiveShio] = useState<number | null>(null);
   const [openSection, setOpenSection] = useState("chart");
-  const shioNumbers = useMemo(() => getShioNumbers(), []);
+  // Use module-level pre-computed map instead of per-render useMemo
+  const shioNumbers = SHIO_NUMBERS_MAP;
 
   const card = isDark ? "bg-slate-800/70 border border-white/8 rounded-2xl" : "bg-white border border-slate-200 rounded-2xl shadow-sm";
   const muted = isDark ? "text-white/50" : "text-slate-400";

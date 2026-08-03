@@ -20,6 +20,8 @@ const SYNC_KEYS = [
   "2d_tengah_history",  // TwoDTengahPage riwayat
 ];
 
+let _saveInFlight = false;
+
 function readAll(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of SYNC_KEYS) {
@@ -30,20 +32,26 @@ function readAll(): Record<string, string> {
 }
 
 async function saveToServer(retries = 2) {
+  if (_saveInFlight) return; // prevent concurrent saves from blur/visibility spam
+  _saveInFlight = true;
   const payload = JSON.stringify({ data: readAll() });
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch("/api/user/data", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      });
-      if (res.ok) return;
-    } catch {}
-    if (attempt < retries) {
-      await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt)));
+  try {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch("/api/user/data", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        });
+        if (res.ok) return;
+      } catch {}
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt)));
+      }
     }
+  } finally {
+    _saveInFlight = false;
   }
 }
 

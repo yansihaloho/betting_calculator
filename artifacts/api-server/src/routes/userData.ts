@@ -50,6 +50,11 @@ router.put("/data", requireAuth, async (req: Request, res: Response) => {
   try {
     const { data } = req.body as { data?: unknown };
     const serialized = JSON.stringify(data ?? {});
+    // Guard against excessively large payloads (>1.5 MB of JSON)
+    if (serialized.length > 1_500_000) {
+      res.status(413).json({ error: "Data too large — maximum 1.5 MB" });
+      return;
+    }
     await db
       .insert(userDataTable)
       .values({
